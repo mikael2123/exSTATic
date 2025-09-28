@@ -18,6 +18,8 @@ The core web extension lies in this repository, whilst additional addons allow i
 
 # Download Links
 * Core WebExtension - [exSTATic](https://github.com/KamWithK/exSTATic/releases/latest)
+  * [Firefox](https://addons.mozilla.org/en-US/firefox/addon/exSTATic)
+  * [Chrome](https://chromewebstore.google.com/detail/exSTATic/boabpbnobedbbggedmlnnlhmacialgac)
 * Textractor Extension - [TextractorSender](https://github.com/KamWithK/TextractorSender/releases/latest)
 
 # Install Instructions
