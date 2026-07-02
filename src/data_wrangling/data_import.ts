@@ -1,6 +1,6 @@
 import { TypeStorage } from "../storage/type_storage";
 import { InstanceStorage, type Stat } from "../storage/instance_storage";
-import { clearImmersionData, clearLineData } from "../storage/reset";
+import { clearStatsData, clearLineData } from "../storage/reset";
 
 import * as browser from "webextension-polyfill";
 import type { DataEntry } from "./data_extraction";
@@ -16,7 +16,7 @@ export async function importStats(
   data: DataEntry[],
   options: ImportOptions = {},
 ) {
-  if (options.force) await clearImmersionData();
+  if (options.force) await clearStatsData();
 
   for (const entry of data) {
     // Skip malformed rows instead of aborting the whole import.

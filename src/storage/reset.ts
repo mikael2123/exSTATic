@@ -1,33 +1,33 @@
 import * as browser from "webextension-polyfill";
 
-// Keys that are NOT immersion data and must survive a "replace all" import:
-// the client id, schema version, capture toggle, the type list, per-type
-// settings, and all Google Drive / backup configuration.
-const ALWAYS_PRESERVE = new Set([
-  "client",
-  "schema_version",
-  "listen_status",
-  "types",
-  "gdrive_client_id",
-  "gdrive_client_secret",
-  "gdrive_refresh_token",
-  "gdrive_access_token",
-  "gdrive_token_expiry",
-  "backup_index",
-  "backup_last_run",
-  "backup_alert",
-]);
-
-// Wipe ALL immersion data (media, per-day stats, line text, date lists) while
-// keeping settings + backup config. Used by "force import stats (replace all)".
-export async function clearImmersionData(): Promise<void> {
+// Remove only per-day stats + the date lists, keeping media details and all
+// stored line text. Used by "force import stats (replace all stats)" so a stats
+// replace never destroys line data.
+export async function clearStatsData(): Promise<void> {
   const all = await browser.storage.local.get(null);
+  const toRemove: string[] = [];
 
-  const preserve = new Set(ALWAYS_PRESERVE);
-  const types = Array.isArray(all["types"]) ? (all["types"] as string[]) : [];
-  for (const type of types) preserve.add(type); // per-type settings object
+  // Per-date list keys (value = [[client, uuid], ...]) are enumerated here.
+  const dates = Array.isArray(all["immersion_dates"])
+    ? (all["immersion_dates"] as string[])
+    : [];
+  for (const date of dates) {
+    if (date in all) toRemove.push(date);
+  }
+  if ("immersion_dates" in all) toRemove.push("immersion_dates");
 
-  const toRemove = Object.keys(all).filter((key) => !preserve.has(key));
+  // Daily-stat keys are ["client", "uuid", "date"] (length-3 JSON arrays);
+  // line keys are ["uuid", <number>] (length 2) and are left untouched.
+  for (const key of Object.keys(all)) {
+    if (!key.startsWith("[")) continue;
+    try {
+      const parsed = JSON.parse(key);
+      if (Array.isArray(parsed) && parsed.length === 3) toRemove.push(key);
+    } catch {
+      // not a JSON key, ignore
+    }
+  }
+
   if (toRemove.length) await browser.storage.local.remove(toRemove);
 }
 

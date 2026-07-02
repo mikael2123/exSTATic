@@ -52,10 +52,10 @@
   );
 
   let [height, width, margin] = $state([1000, 1200, 50]);
-  let safeHeight = $derived.by(() => {
-    const minHeight = Math.max(height, 500);
-    return minHeight > width ? width : minHeight;
-  });
+  // Match the viewBox to the element's real pixel size so the graph fills it
+  // (no square clamp → no letterboxing). The svg gets an explicit height in the
+  // template so the figure measures a real tall value rather than collapsing.
+  let safeHeight = $derived(Math.max(height, 500));
   let safeWidth = $derived(Math.max(width, 500));
 
   // Physical ranges shrink in proport to the maximal circle radius and padding
@@ -117,9 +117,7 @@
     class="flex w-full flex-row items-center"
   >
     <svg
-      height="100%"
-      width="100%"
-      class="max-h-[80vh]"
+      class="h-[78vh] max-h-[80vh] w-full"
       style="resize: both;"
       viewBox="0 0 {safeWidth} {safeHeight}"
       preserveAspectRatio="xMidYMid meet"
