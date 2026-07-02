@@ -7,10 +7,13 @@ import fs from "fs";
 // So two seperate builds are still required
 // Specify which to build with args or both will be built
 let [buildChrome, buildFirefox] = [false, false];
+// Pass "watch" to keep rebuilding on file changes; otherwise build once and exit
+let watch = false;
 const args = process.argv.slice(2);
 for (const arg of args) {
   if (arg === "chrome") buildChrome = true;
   if (arg === "firefox") buildFirefox = true;
+  if (arg === "watch") watch = true;
 }
 if (!buildChrome && !buildFirefox) {
   buildChrome = true;
@@ -48,8 +51,6 @@ const options = {
   entryPoints: [
     "src/background.ts",
     "src/vn/tracker_inject.ts",
-    "src/mokuro/mokuro_inject.ts",
-    "src/ttu/ttu_inject.ts",
     "src/stats/stats_inject.ts",
     "src/settings/settings_inject.ts",
     "src/fonts.ts",
@@ -61,14 +62,19 @@ const options = {
   plugins: [sveltePlugin({ preprocess: sveltePreprocess({ postcss: true }) })],
 };
 
-const context_chrome =
-  !buildChrome ||
-  (await esbuild.context({ ...options, outdir: build_chrome_dir }));
-const context_firefox =
-  !buildFirefox ||
-  (await esbuild.context({ ...options, outdir: build_firefox_dir }));
-await Promise.all([
-  !buildChrome || context_chrome.watch(),
-  !buildFirefox || context_firefox.watch(),
-]);
-// await Promise.all([!buildChrome || context_chrome.dispose(), !buildFirefox || context_firefox.dispose()])
+if (watch) {
+  const contexts = [];
+  if (buildChrome)
+    contexts.push(await esbuild.context({ ...options, outdir: build_chrome_dir }));
+  if (buildFirefox)
+    contexts.push(
+      await esbuild.context({ ...options, outdir: build_firefox_dir }),
+    );
+  await Promise.all(contexts.map((context) => context.watch()));
+  console.log("Watching for changes...");
+} else {
+  if (buildChrome) await esbuild.build({ ...options, outdir: build_chrome_dir });
+  if (buildFirefox)
+    await esbuild.build({ ...options, outdir: build_firefox_dir });
+  console.log("Build complete");
+}

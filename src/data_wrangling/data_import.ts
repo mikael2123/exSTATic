@@ -1,17 +1,31 @@
 import { TypeStorage } from "../storage/type_storage";
 import { InstanceStorage, type Stat } from "../storage/instance_storage";
+import { clearImmersionData, clearLineData } from "../storage/reset";
 
 import * as browser from "webextension-polyfill";
 import type { DataEntry } from "./data_extraction";
+import type { LineRow } from "./data_validation";
 
-export async function importStats(data: DataEntry[]) {
+export interface ImportOptions {
+  // "force" replaces existing data instead of merging into it.
+  force?: boolean;
+}
+
+// Expects rows already validated/normalised by validateStats().
+export async function importStats(
+  data: DataEntry[],
+  options: ImportOptions = {},
+) {
+  if (options.force) await clearImmersionData();
+
   for (const entry of data) {
+    // Skip malformed rows instead of aborting the whole import.
     if (
-      !entry.hasOwnProperty("type") ||
-      !entry.hasOwnProperty("date") ||
-      !entry.hasOwnProperty("given_identifier")
+      entry.type == null ||
+      entry.date == null ||
+      entry.given_identifier == null
     ) {
-      return;
+      continue;
     }
 
     const type_storage = await TypeStorage.buildTypeStorage(
@@ -57,10 +71,16 @@ export async function importStats(data: DataEntry[]) {
   }
 }
 
-export async function importLines(data: { [key: string]: string | number }[]) {
-  data = data.sort(
-    (first, second) => (first["time"] as number) - (second["time"] as number),
-  );
+// Expects rows already validated/sorted by validateLines().
+export async function importLines(
+  data: LineRow[],
+  options: ImportOptions = {},
+  onProgress?: (done: number, total: number) => void,
+) {
+  if (options.force) await clearLineData();
+
+  const total = data.length;
+  let done = 0;
 
   for (const entry of data) {
     const instance_storage = await InstanceStorage.buildInstance(
@@ -77,5 +97,9 @@ export async function importLines(data: { [key: string]: string | number }[]) {
       last_line_added: next_line,
     });
     await browser.storage.local.set(line_entry);
+
+    done++;
+    if (done % 500 === 0) onProgress?.(done, total);
   }
+  onProgress?.(total, total);
 }

@@ -7,6 +7,13 @@ import {
   dataFetched,
   messagingConnected,
 } from "./messaging/socket_actions";
+import { runBackup } from "./backup/backup";
+import {
+  connectDrive,
+  disconnectDrive,
+  getRedirectUri,
+  isConnected,
+} from "./backup/drive_auth";
 
 import * as browser from "webextension-polyfill";
 import type { Tabs } from "webextension-polyfill";
@@ -61,8 +68,57 @@ browser.runtime.onInstalled.addListener(async () => {
   runOnContentScripts(reloadTab);
 });
 
-// Message passing is used for actions which can only be performed on the background page
-browser.runtime.onMessage.addListener(message_action);
+// Backup scheduling: an alarm wakes the (non-persistent) background page even
+// when no exSTATic page is open, and runs regardless of the capture toggle.
+const BACKUP_ALARM = "daily_backup";
+const ensureBackupAlarm = async () => {
+  if (!(await browser.alarms.get(BACKUP_ALARM))) {
+    // Fires roughly every 6h; a missed alarm fires on the next browser start.
+    browser.alarms.create(BACKUP_ALARM, { periodInMinutes: 360 });
+  }
+};
+ensureBackupAlarm();
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === BACKUP_ALARM) runBackup("scheduled");
+});
+
+const driveStatus = async () => {
+  const s = await browser.storage.local.get([
+    "backup_last_run",
+    "backup_alert",
+    "gdrive_client_id",
+  ]);
+  return {
+    connected: await isConnected(),
+    redirectUri: getRedirectUri(),
+    lastRun: s["backup_last_run"] ?? null,
+    alert: s["backup_alert"] ?? null,
+    hasClientId: !!s["gdrive_client_id"],
+  };
+};
+
+// Message passing is used for actions which can only be performed on the
+// background page (downloads, identity/OAuth, Drive fetches, alarms).
+browser.runtime.onMessage.addListener((message: any) => {
+  switch (message?.action) {
+    case "open_tab":
+    case "download":
+      return message_action(message);
+    case "drive_get_redirect_uri":
+      return Promise.resolve({ redirectUri: getRedirectUri() });
+    case "drive_status":
+      return driveStatus();
+    case "drive_connect":
+      return connectDrive();
+    case "drive_disconnect":
+      return disconnectDrive().then(() => ({ ok: true }));
+    case "backup_now":
+      return runBackup("manual");
+    case "pre_import_snapshot":
+      return runBackup("pre_import");
+  }
+  return undefined;
+});
 
 browser.action.onClicked.addListener(async () => {
   const listen_status = (await browser.storage.local.get("listen_status"))[

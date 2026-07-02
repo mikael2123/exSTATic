@@ -1,38 +1,25 @@
 <script lang="ts">
   import MenuOption from "../components/interface/menu_option.svelte";
-  import type { MokuroStorage } from "../mokuro/mokuro_storage";
-  import type { TTUStorage } from "../ttu/ttu_storage";
   import { VNStorage } from "../vn/vn_storage";
-
-  let type = $state("vn");
+  import { AVAILABLE_FONTS } from "../font_list";
+  import BackupSettings from "./backup_settings.svelte";
 
   interface Props {
     vn_storage: VNStorage;
-    mokuro_storage: MokuroStorage;
-    ttu_storage: TTUStorage;
   }
 
-  let { vn_storage, mokuro_storage, ttu_storage }: Props = $props();
+  let { vn_storage }: Props = $props();
 </script>
 
-<div class="flex flex-col gap-10 px-20">
+<div class="flex flex-col gap-6 px-20 pb-20">
   <div
     id="top_bar"
-    class="sticky top-0 z-50 flex h-20 justify-center bg-button bg-opacity-80"
+    class="sticky top-0 z-50 flex h-20 items-center justify-center bg-button bg-opacity-80"
   >
-    <div class="flex flex-row place-items-center gap-3">
-      <p class="header-text">Settings</p>
-      <select class="bg-button" bind:value={type}>
-        <option value="vn">VN</option>
-        <option value="mokuro">Mokuro</option>
-        <option value="ttu">TTU</option>
-      </select>
-    </div>
+    <p class="header-text">Settings</p>
   </div>
-</div>
 
-<div class="absolute left-0 right-0 z-50 grid grid-cols-2 p-5">
-  {#if type === "vn"}
+  <div class="grid grid-cols-2 gap-1">
     <MenuOption
       media_storage={vn_storage}
       id="afk_max_time"
@@ -42,24 +29,16 @@
     />
     <MenuOption
       media_storage={vn_storage}
-      id="inactivity_blur"
-      description="Inactivity Blur"
-      units="px"
-      value="2"
-    />
-    <MenuOption
-      media_storage={vn_storage}
-      id="menu_blur"
-      description="Menu Blur"
-      units="px"
-      value="8"
-      root_css="--default-menu-blur"
+      id="max_loaded_lines"
+      description="Max Loaded Lines"
+      units="UI"
+      value="5000"
     />
     <MenuOption
       media_storage={vn_storage}
       id="font"
       description="Font"
-      type="text"
+      options={AVAILABLE_FONTS}
       value="Klee One"
       root_css="--default-font"
     />
@@ -81,20 +60,6 @@
     />
     <MenuOption
       media_storage={vn_storage}
-      id="afk_max_time"
-      description="Max AFK Time"
-      units="secs"
-      value="60"
-    />
-    <MenuOption
-      media_storage={vn_storage}
-      id="max_loaded_lines"
-      description="Max Loaded Lines"
-      units="UI"
-      value="5000"
-    />
-    <MenuOption
-      media_storage={vn_storage}
       id="inactivity_blur"
       description="Inactivity Blur"
       units="px"
@@ -108,23 +73,9 @@
       value="8"
       root_css="--default-menu-blur"
     />
-  {:else if type === "mokuro"}
-    <MenuOption
-      media_storage={mokuro_storage}
-      id="afk_max_time"
-      description="Max AFK Time"
-      units="secs"
-      value="120"
-    />
-  {:else if type === "ttu"}
-    <MenuOption
-      media_storage={ttu_storage}
-      id="afk_max_time"
-      description="Max AFK Time"
-      units="secs"
-      value="120"
-    />
-  {/if}
+  </div>
+
+  <BackupSettings />
 </div>
 
 <style global lang="postcss">

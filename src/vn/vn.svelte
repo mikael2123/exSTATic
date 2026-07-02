@@ -8,6 +8,13 @@
   import MenuBar from "../components/interface/menu_bar.svelte";
   import MenuOption from "../components/interface/menu_option.svelte";
   import LineHolder from "../components/interface/line_holder.svelte";
+  import OperationModal from "../components/interface/operation_modal.svelte";
+  import { AVAILABLE_FONTS } from "../font_list";
+  import {
+    validateStats,
+    validateLines,
+    type LineRow,
+  } from "../data_wrangling/data_validation";
 
   import { parse } from "papaparse";
   import type { DataEntry } from "../data_wrangling/data_extraction";
@@ -55,52 +62,134 @@
     setTitle(title);
   });
 
-  const requestExportLines = async () => {
-    const confirmed = confirm(
-      "Are you sure you'd like to export lines?\nExporting large numbers of lines can take a long time, please wait and do not retry whilst the operation takes place...",
-    );
+  // ---- Import / export flow with a preview + progress modal ----
+  let modalOpen = $state(false);
+  let modalTitle = $state("");
+  let modalNote = $state("");
+  let modalIssues = $state<string[] | undefined>(undefined);
+  let modalProgress = $state<{ done: number; total: number } | null>(null);
+  let modalProceed = $state<(() => void) | undefined>(undefined);
+  let modalCancel = $state<(() => void) | undefined>(undefined);
 
-    if (confirmed) {
-      await exportLines();
+  const closeModal = () => {
+    modalOpen = false;
+    modalNote = "";
+    modalIssues = undefined;
+    modalProgress = null;
+    modalProceed = undefined;
+    modalCancel = undefined;
+  };
+
+  // Back up before any import: snapshot to Drive if connected, else download locally.
+  const backupBeforeImport = async () => {
+    try {
+      const res: any = await browser.runtime.sendMessage({
+        action: "pre_import_snapshot",
+      });
+      if (res && res.ok) return;
+    } catch (_) {
+      // fall through to a local backup
     }
+    await exportStats();
+    await exportLines();
   };
 
-  const requestImportStats = (event: Event) => {
-    const confirmed = confirm(
-      "Are you sure you'd like to import stats?\nThe imported stats will replace conflicting entries (i.e. on the same days for the same media)...\nIt is highly recommended to BACKUP (export) data regularly in case anything goes wrong (i.e. before importing)!",
-    );
+  const readFile = (event: Event): File | undefined => {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = ""; // allow re-selecting the same file later
+    return file ?? undefined;
+  };
 
-    if (!confirmed) return;
+  const runImportStats = (event: Event, force: boolean) => {
+    const file = readFile(event);
+    if (!file) return;
 
-    parse((event.target as HTMLInputElement).files![0], {
+    parse(file, {
       header: true,
       dynamicTyping: true,
-      complete: async (result) => {
-        await importStats(result.data as DataEntry[]);
-        alert(
-          "Finished importing stats successfully!\nPlease refresh all exSTATic pages now...",
-        );
+      complete: (result) => {
+        const { cleaned, report } = validateStats(result.data as DataEntry[]);
+
+        modalTitle = force ? "Force Import Stats (Replace All)" : "Import Stats";
+        modalNote = force
+          ? "This REPLACES all current data with this file. A backup is made first."
+          : "This merges these stats into your current data. A backup is made first.";
+        modalIssues = report.issues;
+        modalProgress = null;
+        modalProceed = async () => {
+          modalProceed = undefined;
+          modalCancel = undefined;
+          modalIssues = undefined;
+          modalNote = "Backing up current data first…";
+          await backupBeforeImport();
+          modalNote = force ? "Replacing data…" : "Importing stats…";
+          await importStats(cleaned, { force });
+          modalTitle = "Import complete";
+          modalNote = "Done! Please refresh all exSTATic pages.";
+          modalCancel = closeModal;
+        };
+        modalCancel = closeModal;
+        modalOpen = true;
       },
     });
   };
 
-  const requestImportLines = (event: Event) => {
-    const confirmed = confirm(
-      "Are you sure you'd like to import lines?\n Please ensure that ALL stats are up to date beforehand (import if necessary).\nThe imported lines will be inserted after the current ones in storage...\nIt is highly recommended to BACKUP (export) data regularly in case anything goes wrong (i.e. before importing)!",
-    );
+  const runImportLines = (event: Event, force: boolean) => {
+    const file = readFile(event);
+    if (!file) return;
 
-    if (!confirmed) return;
-
-    parse((event.target as HTMLInputElement).files![0], {
+    parse(file, {
       header: true,
       dynamicTyping: true,
-      complete: async (result) => {
-        await importLines(result.data as { [key: string]: string | number }[]);
-        alert(
-          "Finished importing lines successfully!\nPlease refresh all exSTATic pages now...",
-        );
+      complete: (result) => {
+        const { cleaned, report } = validateLines(result.data as LineRow[]);
+
+        modalTitle = force
+          ? "Force Import Lines (Replace All Lines)"
+          : "Import Lines";
+        modalNote = force
+          ? "This REPLACES all stored line text with this file. A backup is made first."
+          : "This adds these lines to storage. A backup is made first.";
+        modalIssues = report.issues;
+        modalProgress = null;
+        modalProceed = async () => {
+          modalProceed = undefined;
+          modalCancel = undefined;
+          modalIssues = undefined;
+          modalNote = "Backing up current data first…";
+          await backupBeforeImport();
+          modalNote = force ? "Replacing lines…" : "Importing lines…";
+          modalProgress = { done: 0, total: cleaned.length };
+          await importLines(cleaned, { force }, (done, total) => {
+            modalProgress = { done, total };
+          });
+          modalTitle = "Import complete";
+          modalNote = "Done! Please refresh all exSTATic pages.";
+          modalProgress = null;
+          modalCancel = closeModal;
+        };
+        modalCancel = closeModal;
+        modalOpen = true;
       },
     });
+  };
+
+  const runExportLines = async () => {
+    modalTitle = "Export Lines";
+    modalNote = "Building your lines file — this can take a while…";
+    modalIssues = undefined;
+    modalProceed = undefined;
+    modalCancel = undefined;
+    modalProgress = { done: 0, total: 0 };
+    modalOpen = true;
+    await exportLines((done, total) => {
+      modalProgress = { done, total };
+    });
+    modalTitle = "Export complete";
+    modalNote = "Your lines file has been downloaded.";
+    modalProgress = null;
+    modalCancel = closeModal;
   };
 
   const openStats = () => {
@@ -175,7 +264,7 @@
         media_storage={vn_storage}
         id="font"
         description="Font"
-        type="text"
+        options={AVAILABLE_FONTS}
         value="Klee One"
         root_css="--default-font"
       />
@@ -236,7 +325,7 @@
       <button id="export_stats" class="menu-button" onclick={exportStats}
         >Export Stats</button
       >
-      <button id="export_lines" class="menu-button" onclick={requestExportLines}
+      <button id="export_lines" class="menu-button" onclick={runExportLines}
         >Export Lines</button
       >
       <button
@@ -248,7 +337,19 @@
           id="import_stats"
           class="hidden"
           type="file"
-          onchange={requestImportStats}
+          onchange={(e) => runImportStats(e, false)}
+        />
+      </button>
+      <button
+        class="menu-button"
+        onclick={() => document.getElementById("force_import_stats")?.click()}
+      >
+        Force Import Stats (Replace All)
+        <input
+          id="force_import_stats"
+          class="hidden"
+          type="file"
+          onchange={(e) => runImportStats(e, true)}
         />
       </button>
       <button
@@ -260,7 +361,19 @@
           id="import_lines"
           class="hidden"
           type="file"
-          onchange={requestImportLines}
+          onchange={(e) => runImportLines(e, false)}
+        />
+      </button>
+      <button
+        class="menu-button"
+        onclick={() => document.getElementById("force_import_lines")?.click()}
+      >
+        Force Import Lines (Replace All)
+        <input
+          id="force_import_lines"
+          class="hidden"
+          type="file"
+          onchange={(e) => runImportLines(e, true)}
         />
       </button>
       <button id="view_stats" class="menu-button" onclick={openStats}
@@ -287,6 +400,16 @@
     {ondblclick}
   />
 </div>
+
+<OperationModal
+  open={modalOpen}
+  title={modalTitle}
+  note={modalNote}
+  issues={modalIssues}
+  progress={modalProgress}
+  onProceed={modalProceed}
+  onCancel={modalCancel}
+/>
 
 <style global lang="postcss">
   @tailwind base;

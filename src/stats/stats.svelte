@@ -25,14 +25,8 @@
   );
   let processedData = $derived(
     client_groups.map(([, v]) => ({
-      uuid:
-        v[0].type === "mokuro"
-          ? JSON.parse(v[0].given_identifier)[0]
-          : v[0].uuid,
-      name:
-        v[0].type === "mokuro" && v[0].name === v[0].given_identifier
-          ? JSON.parse(v[0].given_identifier)[0]
-          : v[0].name,
+      uuid: v[0].uuid,
+      name: v[0].name,
       given_identifier: v[0].given_identifier,
       type: v[0].type,
       date: v[0].date,
@@ -54,18 +48,14 @@
     enableAllTimeView ? "All Time" : getYear(selectedYearStart),
   );
 
-  let mediaType = $state("all");
-
   let filteredData = $derived(
     enableAllTimeView
       ? processedData
-      : processedData
-          .filter(
-            (d) =>
-              selectedYearStart <= parseISO(d.date) &&
-              parseISO(d.date) <= selectedYearEnd,
-          )
-          .filter((d) => mediaType === "all" || d.type === mediaType),
+      : processedData.filter(
+          (d) =>
+            selectedYearStart <= parseISO(d.date) &&
+            parseISO(d.date) <= selectedYearEnd,
+        ),
   );
 
   const nextPeriod = () => (selectedYearStart = addYears(selectedYearStart, 1));
@@ -130,12 +120,6 @@
     >
     <div class="flex flex-row place-items-center gap-3">
       <p class="header-text">{displayTime}</p>
-      <select class="bg-button" bind:value={mediaType}>
-        <option value="all">All</option>
-        <option value="vn">VN</option>
-        <option value="mokuro">Mokuro</option>
-        <option value="ttu">TTU</option>
-      </select>
     </div>
     <button class="material-icons header-text header-icon" onclick={nextPeriod}
       >navigate_next</button
