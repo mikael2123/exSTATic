@@ -75,6 +75,19 @@
     }
   };
 
+  // Pixel positions for gridlines, drawn at each tick and spanning the full
+  // plot. Only continuous (linear/time) scales expose `.ticks()`; band/category
+  // axes are skipped so a bar chart doesn't get a vertical line per category.
+  let gridlines = $derived.by(() => {
+    const s: any = scale;
+    if (!s || !height || !width || typeof s.ticks !== "function") {
+      return [] as number[];
+    }
+    const values =
+      tick_interval !== undefined ? s.ticks(tick_interval) : s.ticks();
+    return values.map((v: any) => s(v) as number);
+  });
+
   $effect(() => {
     if (height && width && margin && position && axis && scale) {
       const axis_creator = positionedAxis(scale)
@@ -97,6 +110,31 @@
   });
 </script>
 
+<!-- Subtle gridlines at each tick, spanning the full plot. Drawn first so they
+     sit behind the spine, tick labels and the plotted data. -->
+<g class="gridlines">
+  {#each gridlines as p}
+    {#if position === "bottom" || position === "top"}
+      <line
+        x1={p}
+        x2={p}
+        y1={margin}
+        y2={height - margin}
+        stroke="grey"
+        stroke-opacity="0.18"
+      />
+    {:else}
+      <line
+        x1={margin}
+        x2={width - margin}
+        y1={p}
+        y2={p}
+        stroke="grey"
+        stroke-opacity="0.18"
+      />
+    {/if}
+  {/each}
+</g>
 <!-- Axis spine spanning the full plot so the x and y axes meet cleanly at the
      corner, regardless of any radius/padding inset on the data scale's range. -->
 {#if position === "bottom" || position === "top"}
