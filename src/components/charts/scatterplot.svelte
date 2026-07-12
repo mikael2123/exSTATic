@@ -104,7 +104,7 @@
       scale_extent[0] !== undefined &&
       scale_extent[1] !== undefined
     ) {
-      return scaleLinear().domain(scale_extent).range([0, radius]);
+      return scaleLinear().domain([0, scale_extent[1]]).range([0, radius]);
     }
   });
 
