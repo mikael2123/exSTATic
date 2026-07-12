@@ -1,3 +1,6 @@
+(This is a personal fork I'm using to test out AI vibecoding by adding and changing some features I wanted to change. I'm not a programmer, so if by some rare chance you decide to try this, take this as your "grain of salt" and warning in case it breaks anything in your setup. In the same vein, if you do decide to try this out, do not bother the original author with problems my version caused.)
+
+
 ![exSTATic](docs/cover.png)
 
 # Zero effort language learning IMMERSION statistic collection and visualisation!
