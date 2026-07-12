@@ -1,5 +1,5 @@
 import * as browser from "webextension-polyfill";
-import { charsInLine, dateNowString, lineSplitCount } from "../calculations";
+import { charsInLine, lineSplitCount, timeToDateString } from "../calculations";
 import type { InstanceStorage, Stat } from "../storage/instance_storage";
 import { MediaStorage } from "../storage/media_storage";
 import type { TypeStorage } from "../storage/type_storage";
@@ -60,11 +60,16 @@ export class VNStorage extends MediaStorage {
 
       this.start_ticker(false);
 
-      await this.instance_storage?.insertLine(line, time);
+      // Resolve the immersion day once (from the event's own timestamp) and use
+      // it for the line entry and every daily bucket, so they can never diverge.
+      const day =
+        this.instance_storage?.currentDay(new Date(time * 1000)) ?? date;
 
-      await this.instance_storage?.addToDates(date);
-      await this.instance_storage?.addToDate(date);
-      await this.instance_storage?.addDailyStats(date, {
+      await this.instance_storage?.insertLine(line, time, day);
+
+      await this.instance_storage?.addToDates(day);
+      await this.instance_storage?.addToDate(day);
+      await this.instance_storage?.addDailyStats(day, {
         lines_read: lineSplitCount(line),
         chars_read: chars_in_line,
       });
@@ -80,30 +85,40 @@ export class VNStorage extends MediaStorage {
     }
   }
 
-  async deleteLines(details: [[number, string, string]]) {
-    let date_stats: { [date: string]: Partial<Stat> } = {};
+  async deleteLines(line_ids: number[]) {
+    if (this.instance_storage === undefined) return;
 
-    details.forEach(([, line, date]: [number, string, string]) => {
-      if (date === undefined) {
-        date = dateNowString();
+    // Read each line's own stored bucket day and text straight from storage, so
+    // the stats we subtract land in exactly the bucket the line contributed to —
+    // regardless of any rollover-hour change since it was recorded.
+    const date_stats: { [date: string]: Partial<Stat> } = {};
+
+    for (const line_id of line_ids) {
+      const key = JSON.stringify([this.uuid, line_id]);
+      const entry = (await browser.storage.local.get(key))[key];
+      if (entry === undefined) continue;
+
+      const line: string = typeof entry === "string" ? entry : entry[0];
+      const time: number | undefined =
+        typeof entry === "string" ? undefined : entry[1];
+      const day: string =
+        Array.isArray(entry) && typeof entry[2] === "string"
+          ? entry[2] // day stored at insert (authoritative)
+          : time !== undefined && !isNaN(time)
+            ? timeToDateString(time)! // legacy entry: its raw calendar day
+            : this.instance_storage.currentDay();
+
+      if (!date_stats[day]) {
+        date_stats[day] = { lines_read: 0, chars_read: 0 };
       }
+      date_stats[day].lines_read =
+        (date_stats[day].lines_read ?? 0) + lineSplitCount(line);
+      date_stats[day].chars_read =
+        (date_stats[day].chars_read ?? 0) + charsInLine(line);
+    }
 
-      const date_stat = date_stats[date];
-
-      if (!date_stat) {
-        date_stats[date] = { lines_read: 0, chars_read: 0 };
-      }
-
-      date_stats[date].lines_read =
-        date_stat.lines_read ?? 0 + lineSplitCount(line);
-      date_stats[date].chars_read =
-        date_stat.chars_read ?? 0 + charsInLine(line);
-    });
-
-    await this.instance_storage?.deleteLines(
-      details.map(([line_id, ,]) => line_id),
-    );
-    await this.instance_storage?.subStats(date_stats);
+    await this.instance_storage.deleteLines(line_ids);
+    await this.instance_storage.subStats(date_stats);
   }
 
   async deleteLine(line_id: number, line: string, date: string) {

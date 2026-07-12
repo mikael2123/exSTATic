@@ -1,4 +1,5 @@
-import { dateNowString } from "../calculations";
+import { immersionDay } from "../calculations";
+import type { TypeProperties } from "./type_storage";
 
 import { Mutex } from "async-mutex";
 import * as browser from "webextension-polyfill";
@@ -42,32 +43,44 @@ export class InstanceStorage<
   client: string;
   details: TDetails;
   today_stats: Stat;
+  // Live reference to the type's properties, so the rollover setting is always
+  // current. Optional: import paths build instances without it (offset 0).
+  properties?: TypeProperties;
 
   constructor(
     uuid: string,
     client: string,
     details: TDetails,
     today_stats: Stat,
+    properties?: TypeProperties,
   ) {
     this.uuid = uuid;
     this.mutex = new Mutex();
     this.client = client;
     this.details = details;
     this.today_stats = today_stats;
+    this.properties = properties;
   }
 
-  static async buildInstance(uuid: string) {
+  // The current immersion day, honouring the rollover-hour setting. Single
+  // source of truth for every "is this today?" decision in the write path.
+  currentDay(when?: Date): string {
+    return immersionDay(this.properties?.day_rollover_hours ?? 0, when);
+  }
+
+  static async buildInstance(uuid: string, properties?: TypeProperties) {
     const client = (await browser.storage.local.get("client"))["client"];
 
     const rawDetails = await browser.storage.local.get(uuid);
     const details = rawDetails.hasOwnProperty(uuid) ? rawDetails[uuid] : {};
 
-    const uuid_date_key = JSON.stringify([uuid, dateNowString()]);
+    const today = immersionDay(properties?.day_rollover_hours ?? 0);
+    const uuid_date_key = JSON.stringify([uuid, today]);
     const today_stats = (await browser.storage.local.get(uuid_date_key))[
       uuid_date_key
     ];
 
-    return new InstanceStorage(uuid, client, details, today_stats);
+    return new InstanceStorage(uuid, client, details, today_stats, properties);
   }
 
   async updateDetails(details: Partial<TDetails | InstanceDetails>) {
@@ -84,7 +97,7 @@ export class InstanceStorage<
     let daily_stats_entry = await browser.storage.local.get(uuid_date_key);
 
     daily_stats_entry[uuid_date_key] = values;
-    if (date == dateNowString()) {
+    if (date == this.currentDay()) {
       this.today_stats = daily_stats_entry[uuid_date_key];
     }
 
@@ -125,7 +138,7 @@ export class InstanceStorage<
         date_stats[key][stat] += value * multiple;
       });
 
-      if (date == dateNowString()) {
+      if (date == this.currentDay()) {
         this.today_stats = date_stats[key];
       }
     });
@@ -148,12 +161,17 @@ export class InstanceStorage<
     await this.addDailyStats(date, values, -1 * multiple);
   }
 
-  async insertLine(line: string, time: number) {
+  async insertLine(line: string, time: number, day?: string) {
     const line_key = JSON.stringify([
       this.uuid,
       this.details.last_line_added + 1,
     ]);
-    let line_entry = { [line_key]: [line, time] };
+    // Store the resolved bucket day alongside the raw timestamp so deletion
+    // always targets the exact bucket the line was added to, even if the
+    // rollover setting changes later. Legacy entries stay [line, time].
+    let line_entry = {
+      [line_key]: day !== undefined ? [line, time, day] : [line, time],
+    };
 
     await this.updateDetails({
       last_line_added: this.details.last_line_added + 1,

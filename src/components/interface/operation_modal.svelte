@@ -9,6 +9,8 @@
     onCancel?: (() => void) | undefined;
     proceedLabel?: string;
     cancelLabel?: string;
+    // Optional extra body content (e.g. a "Replace all" checkbox).
+    children?: import("svelte").Snippet;
   }
 
   let {
@@ -21,6 +23,7 @@
     onCancel = undefined,
     proceedLabel = "Proceed",
     cancelLabel = "Cancel",
+    children = undefined,
   }: Props = $props();
 
   let percent = $derived(
@@ -42,6 +45,8 @@
       <h2 class="text-2xl font-semibold">{title}</h2>
 
       {#if note}<p>{note}</p>{/if}
+
+      {#if children}{@render children()}{/if}
 
       {#if issues}
         <div class="max-h-60 overflow-auto bg-menu p-3 text-sm text-menu-text">

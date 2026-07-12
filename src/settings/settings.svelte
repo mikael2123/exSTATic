@@ -36,6 +36,13 @@
     />
     <MenuOption
       media_storage={vn_storage}
+      id="day_rollover_hours"
+      description="Day Starts At"
+      units="hrs after midnight"
+      value="0"
+    />
+    <MenuOption
+      media_storage={vn_storage}
       id="font"
       description="Font"
       options={AVAILABLE_FONTS}

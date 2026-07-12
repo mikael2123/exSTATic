@@ -1,6 +1,12 @@
 <script lang="ts">
   import * as browser from "webextension-polyfill";
   import { onMount } from "svelte";
+  import OperationModal from "../components/interface/operation_modal.svelte";
+  import {
+    backupBeforeImport,
+    importLinesFromCsv,
+    importStatsFromCsv,
+  } from "../data_wrangling/import_flow";
 
   let clientId = $state("");
   let clientSecret = $state("");
@@ -10,6 +16,27 @@
   let alertMsg = $state<string | null>(null);
   let busy = $state(false);
   let message = $state("");
+
+  // ---- Import from Drive: confirmation + progress modal ----
+  let modalOpen = $state(false);
+  let modalTitle = $state("");
+  let modalNote = $state("");
+  let modalProgress = $state<{ done: number; total: number } | null>(null);
+  let modalProceed = $state<(() => void) | undefined>(undefined);
+  let modalCancel = $state<(() => void) | undefined>(undefined);
+  // Force ("replace all") state for the import confirmation popup.
+  let modalForce = $state(false);
+  let modalShowForce = $state(false);
+
+  const closeModal = () => {
+    modalOpen = false;
+    modalNote = "";
+    modalProgress = null;
+    modalProceed = undefined;
+    modalCancel = undefined;
+    modalForce = false;
+    modalShowForce = false;
+  };
 
   const loadStatus = async () => {
     const cfg = await browser.storage.local.get([
@@ -59,6 +86,65 @@
       ? `Backup complete (stats: ${res.results.stats}, lines: ${res.results.lines}).`
       : `Backup failed: ${res.error}`;
     await loadStatus();
+  };
+
+  const importFromDrive = async () => {
+    busy = true;
+    message = "Checking Google Drive for the latest backup…";
+    const res: any = await browser.runtime.sendMessage({
+      action: "drive_fetch_latest",
+    });
+    busy = false;
+
+    if (!res.ok) {
+      message = `Could not fetch from Drive: ${res.error}`;
+      return;
+    }
+    message = "";
+
+    const statsCsv: string | undefined = res.statsCsv;
+    const linesCsv: string | undefined = res.linesCsv;
+
+    modalTitle = "Import from Drive";
+    modalNote =
+      "This imports the latest stats & lines backup found on Google Drive into your current data. A backup is made first.";
+    modalProgress = null;
+    modalForce = false;
+    modalShowForce = true;
+    modalProceed = async () => {
+      const force = modalForce;
+      modalProceed = undefined;
+      modalCancel = undefined;
+      modalShowForce = false;
+      try {
+        modalNote = "Backing up current data first…";
+        await backupBeforeImport();
+
+        if (statsCsv) {
+          modalNote = force ? "Replacing stats…" : "Importing stats…";
+          await importStatsFromCsv(statsCsv, force);
+        }
+        if (linesCsv) {
+          modalNote = force ? "Replacing lines…" : "Importing lines…";
+          modalProgress = { done: 0, total: 0 };
+          await importLinesFromCsv(linesCsv, force, (done, total) => {
+            modalProgress = { done, total };
+          });
+        }
+
+        modalTitle = "Import complete";
+        modalNote = "Done! Please refresh all exSTATic pages.";
+        modalProgress = null;
+        modalCancel = closeModal;
+      } catch (e: any) {
+        modalTitle = "Import failed";
+        modalNote = `Something went wrong: ${e?.message ?? e}`;
+        modalProgress = null;
+        modalCancel = closeModal;
+      }
+    };
+    modalCancel = closeModal;
+    modalOpen = true;
   };
 
   const disconnect = async () => {
@@ -148,3 +234,43 @@
 
   {#if message}<p class="italic">{message}</p>{/if}
 </div>
+
+{#if connected}
+  <div class="m-5 flex flex-col gap-3 bg-block p-5 text-icon">
+    <h2 class="text-2xl font-semibold">Import from Drive</h2>
+    <p>
+      Pulls the latest stats & lines backup from Google Drive and imports it
+      into your current data. A backup is made first.
+    </p>
+    <div class="flex flex-wrap gap-2">
+      <button
+        class="bg-button px-3 py-2"
+        onclick={importFromDrive}
+        disabled={busy}>Import latest from Drive</button
+      >
+    </div>
+  </div>
+{/if}
+
+<OperationModal
+  open={modalOpen}
+  title={modalTitle}
+  note={modalNote}
+  progress={modalProgress}
+  onProceed={modalProceed}
+  onCancel={modalCancel}
+  proceedLabel={modalForce ? "Replace all" : "Proceed"}
+>
+  {#if modalShowForce}
+    <label class="flex items-center gap-2">
+      <input type="checkbox" bind:checked={modalForce} />
+      Replace all (force) — wipe current data first
+    </label>
+    {#if modalForce}
+      <p class="bg-amber-700 p-2 text-sm text-white">
+        ⚠ Are you sure? This permanently deletes your current stats and lines
+        before importing. A backup is still made first.
+      </p>
+    {/if}
+  {/if}
+</OperationModal>

@@ -60,6 +60,25 @@ export async function getData(): Promise<DataEntry[]> {
   return data.flat();
 }
 
+// Cheap check for whether any stored line text exists (any media whose
+// last_line_added has advanced past its initial -1). Reads only media details,
+// not the (potentially huge) line entries themselves.
+export async function hasLineData(): Promise<boolean> {
+  const media = (await browser.storage.local.get("media"))["media"] as
+    | { [key: string]: string }
+    | undefined;
+  if (!media) return false;
+
+  const uuids = Object.values(media);
+  if (uuids.length === 0) return false;
+
+  const details = await browser.storage.local.get(uuids);
+  return Object.values(details).some(
+    (d: any) =>
+      d && typeof d.last_line_added === "number" && d.last_line_added >= 0,
+  );
+}
+
 export async function getInstanceData([uuid, details]: [
   string,
   InstanceDetails,

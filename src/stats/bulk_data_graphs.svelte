@@ -5,6 +5,11 @@
   } from "../components/charts/popup.svelte";
   import Scatterplot from "../components/charts/scatterplot.svelte";
   import type { DataEntry } from "../data_wrangling/data_extraction";
+  import { format } from "d3-format";
+
+  // Time Read is stored in raw seconds; render it in minutes on this chart
+  // only (Reading Speed keeps the default `.2s` formatter).
+  const time_read_minutes_formatter = format("~s");
 
   interface Props {
     data: DataEntry[];
@@ -45,13 +50,14 @@
   <Scatterplot
     {data}
     x_accessor={date_accessor}
-    y_accessor={time_read_accessor}
+    y_accessor={(d) => time_read_accessor(d) / 60}
     r_accessor={chars_read_accessor}
     c_accessor={name_accessor}
     {tooltip_accessors}
     {tooltip_formatters}
     graph_title="Immersion Quantity"
     x_label="Date"
-    y_label="Time Read"
+    y_label="Time Read (minutes)"
+    y_formatter={time_read_minutes_formatter}
   />
 </div>

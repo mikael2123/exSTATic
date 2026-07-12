@@ -92,3 +92,24 @@ export async function renameFile(
   });
   if (!res.ok) throw new Error(`Drive rename failed (${res.status}).`);
 }
+
+export async function downloadFileText(fileId: string): Promise<string> {
+  const headers = await authHeader();
+  const res = await fetch(`${FILES}/${fileId}?alt=media`, { headers });
+  if (!res.ok) throw new Error(`Drive download failed (${res.status}).`);
+  return await res.text();
+}
+
+export async function listFiles(
+  folderId: string,
+): Promise<{ id: string; name: string; modifiedTime: string }[]> {
+  const headers = await authHeader();
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+  const res = await fetch(
+    `${FILES}?q=${q}&fields=files(id,name,modifiedTime)&orderBy=modifiedTime desc`,
+    { headers },
+  );
+  if (!res.ok) throw new Error(`Drive file listing failed (${res.status}).`);
+  const data = await res.json();
+  return data.files ?? [];
+}

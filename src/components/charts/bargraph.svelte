@@ -68,7 +68,8 @@
       scale_extent[0] !== undefined &&
       scale_extent[1] !== undefined
     ) {
-      return scaleLinear().domain(scale_extent).range(y_range).nice();
+      // Anchor bars at 0 so their heights are proportional (and never negative).
+      return scaleLinear().domain([0, scale_extent[1]]).range(y_range).nice();
     }
   });
 

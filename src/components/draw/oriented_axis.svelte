@@ -25,6 +25,10 @@
       | ((x_value: string) => string)
       | ((date: Date) => string);
     label?: string;
+    // Passed straight through to the d3fc axis' `.ticks()` when provided
+    // (e.g. `timeMonth` to force exactly one tick per calendar month).
+    // Left undefined, the axis falls back to its own default tick count.
+    tick_interval?: any;
   }
 
   let {
@@ -35,6 +39,7 @@
     position,
     formatter,
     label = "",
+    tick_interval = undefined,
   }: Props = $props();
 
   let axis: SVGGElement | undefined = $state();
@@ -70,46 +75,16 @@
     }
   };
 
-  const enlargedScale = () => {
-    if (!scale) return;
-
-    const axis_scale = scale.copy();
-    const range = axis_scale.range();
-    let excess;
-
-    if ("invert" in axis_scale === false) return;
-
-    // Find how much more room is physical range is available than was specified
-    // NOTE: A margins worth of extra space is allowed at the start and end
-    if (position === "bottom" || position === "top") {
-      excess = width - margin * 2 - (range[1] - range[0]);
-    } else if (position == "left" || position == "right") {
-      excess = height - margin * 2 - (range[1] - range[0]);
-    }
-
-    // Find the positions in the domain these uncovered extremes would have mapped to
-    const extended_range = [range[0] - excess! / 2, range[1] + excess! / 2];
-    const extended_domain = [
-      axis_scale.invert(extended_range[0]),
-      axis_scale.invert(extended_range[1]),
-    ];
-
-    const axis_extended = axis_scale.domain(extended_domain);
-
-    if ("range" in axis_extended === false) return;
-
-    // Modify the domain and range to cover the full available section
-    return axis_extended.range(extended_range);
-  };
-
   $effect(() => {
     if (height && width && margin && position && axis && scale) {
-      const axis_creator = positionedAxis(
-        "invert" in scale ? enlargedScale() : scale,
-      )
+      const axis_creator = positionedAxis(scale)
         .tickSizeOuter(0)
         .tickSize(0)
         .tickFormat(formatter);
+
+      if (tick_interval !== undefined) {
+        axis_creator.ticks(tick_interval);
+      }
 
       axis_creator(select(axis));
       transitionAxis();

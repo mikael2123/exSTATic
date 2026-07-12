@@ -14,6 +14,7 @@ import {
   getRedirectUri,
   isConnected,
 } from "./backup/drive_auth";
+import { downloadFileText, ensureFolder, listFiles } from "./backup/drive_client";
 
 import * as browser from "webextension-polyfill";
 import type { Tabs } from "webextension-polyfill";
@@ -97,6 +98,60 @@ const driveStatus = async () => {
   };
 };
 
+// Resolve the latest stats + lines backup CSVs from Google Drive: prefer the
+// exact file ids recorded in backup_index, and fall back to listing the
+// backups folder (e.g. a fresh profile that lost local storage but whose
+// Drive files still exist) and matching by the naming convention used in
+// backup.ts ("exSTATic_stats.csv" / "exSTATic_lines.csv").
+const fetchLatestFromDrive = async (): Promise<
+  | { ok: true; statsCsv?: string; linesCsv?: string }
+  | { ok: false; error: string }
+> => {
+  try {
+    const stored = await browser.storage.local.get("backup_index");
+    const index =
+      (stored["backup_index"] as
+        | { stats?: { fileId: string }; lines?: { fileId: string } }
+        | undefined) ?? {};
+
+    let statsFileId = index.stats?.fileId;
+    let linesFileId = index.lines?.fileId;
+
+    if (!statsFileId || !linesFileId) {
+      const folderId = await ensureFolder();
+      const files = await listFiles(folderId);
+      if (!statsFileId) {
+        statsFileId = files.find((f) =>
+          f.name.toLowerCase().includes("stats"),
+        )?.id;
+      }
+      if (!linesFileId) {
+        linesFileId = files.find((f) =>
+          f.name.toLowerCase().includes("lines"),
+        )?.id;
+      }
+    }
+
+    if (!statsFileId && !linesFileId) {
+      return {
+        ok: false,
+        error: 'No Drive backup found — use "Backup now" first.',
+      };
+    }
+
+    const statsCsv = statsFileId
+      ? await downloadFileText(statsFileId)
+      : undefined;
+    const linesCsv = linesFileId
+      ? await downloadFileText(linesFileId)
+      : undefined;
+
+    return { ok: true, statsCsv, linesCsv };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+};
+
 // Message passing is used for actions which can only be performed on the
 // background page (downloads, identity/OAuth, Drive fetches, alarms).
 browser.runtime.onMessage.addListener((message: any) => {
@@ -116,6 +171,8 @@ browser.runtime.onMessage.addListener((message: any) => {
       return runBackup("manual");
     case "pre_import_snapshot":
       return runBackup("pre_import");
+    case "drive_fetch_latest":
+      return fetchLatestFromDrive();
   }
   return undefined;
 });

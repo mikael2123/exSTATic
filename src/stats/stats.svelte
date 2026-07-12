@@ -2,11 +2,14 @@
   import BulkDataGraphs from "./bulk_data_graphs.svelte";
   import MediaGraphs from "./media_graphs.svelte";
   import CalendarHeatmap from "../components/charts/calendar_heatmap.svelte";
+  import OperationModal from "../components/interface/operation_modal.svelte";
 
+  import { onMount } from "svelte";
   import { groups, sum, min } from "d3-array";
   import { format } from "d3-format";
   import { parseISO, startOfYear, addYears, subYears, getYear } from "date-fns";
   import type { DataEntry } from "../data_wrangling/data_extraction";
+  import { hasLineData } from "../data_wrangling/data_extraction";
   import type {
     TooltipAccessors,
     TooltipFormatters,
@@ -107,6 +110,27 @@
     },
     "Read Speed": format(",.0f"),
   };
+
+  // Empty-state reminder: after reloading the extension in development the user
+  // may forget to re-import their data, so nudge them once on load if stats
+  // and/or lines are missing.
+  let emptyModalOpen = $state(false);
+  let emptyModalTitle = $state("");
+  let emptyModalNote = $state("");
+
+  onMount(async () => {
+    const noStats = data.length === 0;
+    const noLines = !(await hasLineData());
+    if (!noStats && !noLines) return;
+
+    const missing = noStats && noLines ? "stats or lines" : noStats ? "stats" : "lines";
+    emptyModalTitle = `You have no ${missing} yet`;
+    emptyModalNote =
+      `No ${missing} were found in this browser. If you have data to import, ` +
+      "open a reading page and use Import Stats / Import Lines in the ⋮ menu, " +
+      "or go to Settings → Google Drive Backups → Import latest from Drive.";
+    emptyModalOpen = true;
+  });
 </script>
 
 <div class="flex flex-col gap-10 px-20">
@@ -159,6 +183,14 @@
     />
   {/if}
 </div>
+
+<OperationModal
+  open={emptyModalOpen}
+  title={emptyModalTitle}
+  note={emptyModalNote}
+  onCancel={() => (emptyModalOpen = false)}
+  cancelLabel="Got it"
+/>
 
 <style global lang="postcss">
   @tailwind base;

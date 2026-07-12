@@ -23,6 +23,9 @@ export interface TypeProperties {
   max_loaded_lines: string;
   menu_blur: string;
   previous_uuid?: string;
+  // Hours past midnight that a new "immersion day" starts (default 0 = midnight).
+  // Optional because objects stored before this setting existed won't have it.
+  day_rollover_hours?: number;
 }
 
 export class TypeStorage {

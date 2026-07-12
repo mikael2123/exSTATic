@@ -47,13 +47,13 @@
   <BarGraph
     {data}
     x_accessor={name_accessor}
-    y_accessor={time_read_accessor}
+    y_accessor={(d) => time_read_accessor(d) / 60}
     c_accessor={name_accessor}
     {tooltip_accessors}
     {tooltip_formatters}
     graph_title="Reading Time Quantity"
     x_label="Name"
-    y_label="Time Read"
+    y_label="Time Read (minutes)"
   />
 
   <BarGraph

@@ -1,9 +1,9 @@
 <script lang="ts">
   import * as browser from "webextension-polyfill";
-  import { timeToDateString } from "../calculations";
   import type { VNStorage } from "./vn_storage";
   import { exportLines, exportStats } from "../data_wrangling/data_export";
   import { importLines, importStats } from "../data_wrangling/data_import";
+  import { backupBeforeImport } from "../data_wrangling/import_flow";
   import StatBar from "../components/interface/stat_bar.svelte";
   import MenuBar from "../components/interface/menu_bar.svelte";
   import MenuOption from "../components/interface/menu_option.svelte";
@@ -70,6 +70,9 @@
   let modalProgress = $state<{ done: number; total: number } | null>(null);
   let modalProceed = $state<(() => void) | undefined>(undefined);
   let modalCancel = $state<(() => void) | undefined>(undefined);
+  // Force ("replace all") state for the import confirmation popup.
+  let modalForce = $state(false);
+  let modalShowForce = $state(false);
 
   const closeModal = () => {
     modalOpen = false;
@@ -78,20 +81,8 @@
     modalProgress = null;
     modalProceed = undefined;
     modalCancel = undefined;
-  };
-
-  // Back up before any import: snapshot to Drive if connected, else download locally.
-  const backupBeforeImport = async () => {
-    try {
-      const res: any = await browser.runtime.sendMessage({
-        action: "pre_import_snapshot",
-      });
-      if (res && res.ok) return;
-    } catch (_) {
-      // fall through to a local backup
-    }
-    await exportStats();
-    await exportLines();
+    modalForce = false;
+    modalShowForce = false;
   };
 
   const readFile = (event: Event): File | undefined => {
@@ -101,7 +92,7 @@
     return file ?? undefined;
   };
 
-  const runImportStats = (event: Event, force: boolean) => {
+  const runImportStats = (event: Event) => {
     const file = readFile(event);
     if (!file) return;
 
@@ -111,16 +102,19 @@
       complete: (result) => {
         const { cleaned, report } = validateStats(result.data as DataEntry[]);
 
-        modalTitle = force ? "Force Import Stats (Replace All)" : "Import Stats";
-        modalNote = force
-          ? "This REPLACES all current data with this file. A backup is made first."
-          : "This merges these stats into your current data. A backup is made first.";
+        modalTitle = "Import Stats";
+        modalNote =
+          "This merges these stats into your current data. A backup is made first.";
         modalIssues = report.issues;
         modalProgress = null;
+        modalForce = false;
+        modalShowForce = true;
         modalProceed = async () => {
+          const force = modalForce;
           modalProceed = undefined;
           modalCancel = undefined;
           modalIssues = undefined;
+          modalShowForce = false;
           modalNote = "Backing up current data first…";
           await backupBeforeImport();
           modalNote = force ? "Replacing data…" : "Importing stats…";
@@ -135,7 +129,7 @@
     });
   };
 
-  const runImportLines = (event: Event, force: boolean) => {
+  const runImportLines = (event: Event) => {
     const file = readFile(event);
     if (!file) return;
 
@@ -145,18 +139,19 @@
       complete: (result) => {
         const { cleaned, report } = validateLines(result.data as LineRow[]);
 
-        modalTitle = force
-          ? "Force Import Lines (Replace All Lines)"
-          : "Import Lines";
-        modalNote = force
-          ? "This REPLACES all stored line text with this file. A backup is made first."
-          : "This adds these lines to storage. A backup is made first.";
+        modalTitle = "Import Lines";
+        modalNote =
+          "This adds these lines to storage. A backup is made first.";
         modalIssues = report.issues;
         modalProgress = null;
+        modalForce = false;
+        modalShowForce = true;
         modalProceed = async () => {
+          const force = modalForce;
           modalProceed = undefined;
           modalCancel = undefined;
           modalIssues = undefined;
+          modalShowForce = false;
           modalNote = "Backing up current data first…";
           await backupBeforeImport();
           modalNote = force ? "Replacing lines…" : "Importing lines…";
@@ -231,13 +226,11 @@
     if (!confirmed) return;
 
     const parents = checked_boxes.map((checkbox) => checkbox.parentElement);
-    const details = parents.map((element_div) => [
+    const line_ids = parents.map((element_div) =>
       Number.parseInt(element_div?.dataset.lineId!),
-      element_div?.textContent,
-      timeToDateString(Number.parseInt(element_div?.dataset.time!)),
-    ]);
+    );
 
-    await vn_storage.deleteLines(details as [[number, string, string]]);
+    await vn_storage.deleteLines(line_ids);
     parents.forEach((element_div) => element_div?.remove());
   };
 </script>
@@ -337,19 +330,7 @@
           id="import_stats"
           class="hidden"
           type="file"
-          onchange={(e) => runImportStats(e, false)}
-        />
-      </button>
-      <button
-        class="menu-button"
-        onclick={() => document.getElementById("force_import_stats")?.click()}
-      >
-        Force Import Stats (Replace All)
-        <input
-          id="force_import_stats"
-          class="hidden"
-          type="file"
-          onchange={(e) => runImportStats(e, true)}
+          onchange={(e) => runImportStats(e)}
         />
       </button>
       <button
@@ -361,19 +342,7 @@
           id="import_lines"
           class="hidden"
           type="file"
-          onchange={(e) => runImportLines(e, false)}
-        />
-      </button>
-      <button
-        class="menu-button"
-        onclick={() => document.getElementById("force_import_lines")?.click()}
-      >
-        Force Import Lines (Replace All)
-        <input
-          id="force_import_lines"
-          class="hidden"
-          type="file"
-          onchange={(e) => runImportLines(e, true)}
+          onchange={(e) => runImportLines(e)}
         />
       </button>
       <button id="view_stats" class="menu-button" onclick={openStats}
@@ -409,7 +378,22 @@
   progress={modalProgress}
   onProceed={modalProceed}
   onCancel={modalCancel}
-/>
+  proceedLabel={modalForce ? "Replace all" : "Proceed"}
+>
+  {#if modalShowForce}
+    <label class="flex items-center gap-2">
+      <input type="checkbox" bind:checked={modalForce} />
+      Replace all (force) — wipe current data first
+    </label>
+    {#if modalForce}
+      <p class="bg-amber-700 p-2 text-sm text-white">
+        ⚠ Are you sure? This permanently deletes your current
+        {modalTitle.includes("Lines") ? "lines" : "stats"} before importing. A
+        backup is still made first.
+      </p>
+    {/if}
+  {/if}
+</OperationModal>
 
 <style global lang="postcss">
   @tailwind base;

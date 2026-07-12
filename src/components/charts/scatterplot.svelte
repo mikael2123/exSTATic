@@ -10,6 +10,7 @@
   import { extent, group } from "d3-array";
   import { format } from "d3-format";
   import { timeFormat } from "d3-time-format";
+  import { timeMonth } from "d3-time";
   import { scaleLinear, scaleTime } from "d3-scale";
   import iwanthue from "iwanthue";
   import type { DataEntry } from "../../data_wrangling/data_extraction";
@@ -25,6 +26,9 @@
     graph_title: string;
     x_label: string;
     y_label: string;
+    // Overrides the Y axis tick/value formatter (defaults to `format(".2s")`,
+    // used e.g. by the Time Read chart to render clean minute values).
+    y_formatter?: (n: number | { valueOf(): number }) => string;
   }
 
   let {
@@ -38,6 +42,7 @@
     graph_title,
     x_label,
     y_label,
+    y_formatter = format(".2s"),
   }: Props = $props();
 
   let radius = 60;
@@ -82,7 +87,9 @@
       scale_extent[0] !== undefined &&
       scale_extent[1] !== undefined
     ) {
-      return scaleLinear().domain(scale_extent).range(y_range).nice();
+      // Reading time / speed / chars are never negative — anchor the Y axis at 0
+      // so it never shows impossible negative values.
+      return scaleLinear().domain([0, scale_extent[1]]).range(y_range).nice();
     }
   });
   let r_scale = $derived.by(() => {
@@ -102,7 +109,15 @@
     r_accessor && r_scale && r_scale(r_accessor(d));
   const cGet = (d: DataEntry) => hues[groups.indexOf(c_accessor(d))];
 
-  const [x_formatter, y_formatter] = [timeFormat("%B\n%Y"), format(".2s")];
+  // One tick per calendar month (see `tick_interval={timeMonth}` below); show
+  // the abbreviated month, and only print the year under the January tick so
+  // it doesn't repeat on every label.
+  const month_formatter = timeFormat("%b");
+  const year_formatter = timeFormat("%Y");
+  const x_formatter = (d: Date) =>
+    d.getMonth() === 0
+      ? `${month_formatter(d)}\n${year_formatter(d)}`
+      : month_formatter(d);
 
   let mouse_move: (event: MouseEvent) => void = $state(() => {});
   let mouse_out: () => void = $state(() => {});
@@ -130,6 +145,7 @@
         position="bottom"
         formatter={x_formatter}
         label={x_label}
+        tick_interval={timeMonth}
       />
       <LineAxis
         scale={y_scale}

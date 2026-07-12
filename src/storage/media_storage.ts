@@ -1,5 +1,5 @@
 import * as browser from "webextension-polyfill";
-import { dateNowString, timeNowSeconds } from "../calculations";
+import { timeNowSeconds } from "../calculations";
 import { InstanceStorage, type InstanceDetails } from "./instance_storage";
 import { TypeStorage, type TypeProperties } from "./type_storage";
 
@@ -50,6 +50,7 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
     const instance_storage = type_storage.properties.previous_uuid
       ? await InstanceStorage.buildInstance(
           type_storage.properties.previous_uuid,
+          type_storage.properties,
         )
       : undefined;
 
@@ -80,7 +81,10 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
     }
 
     // Replace the storage entry
-    const instance_storage = await InstanceStorage.buildInstance(new_uuid);
+    const instance_storage = await InstanceStorage.buildInstance(
+      new_uuid,
+      this.type_storage.properties,
+    );
     this.instance_storage = instance_storage;
 
     // Set the easy-access properties
@@ -138,7 +142,7 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
 
     // Keep incrementing the time read counter whilst the max afk time isn't exceeded
     if (time_between_lines <= this.properties.afk_max_time) {
-      await this.instance_storage.addDailyStats(dateNowString(), {
+      await this.instance_storage.addDailyStats(this.instance_storage.currentDay(), {
         time_read: time_between_ticks,
       });
       this.start_ticker();
