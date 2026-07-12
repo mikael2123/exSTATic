@@ -89,11 +89,33 @@
       axis_creator(select(axis));
       transitionAxis();
 
-      select(axis).select("path").style("stroke", "grey");
+      // Hide d3fc's own domain path: it only spans the scale's data range (in
+      // the scatter plot that's inset by the circle radius), so it stops short
+      // of the corner. We draw the spine ourselves below to span the full plot.
+      select(axis).select("path").style("stroke", "none");
     }
   });
 </script>
 
+<!-- Axis spine spanning the full plot so the x and y axes meet cleanly at the
+     corner, regardless of any radius/padding inset on the data scale's range. -->
+{#if position === "bottom" || position === "top"}
+  <line
+    x1={margin}
+    x2={width - margin}
+    y1={position === "bottom" ? height - margin : margin}
+    y2={position === "bottom" ? height - margin : margin}
+    stroke="grey"
+  />
+{:else}
+  <line
+    x1={position === "left" ? margin : width - margin}
+    x2={position === "left" ? margin : width - margin}
+    y1={margin}
+    y2={height - margin}
+    stroke="grey"
+  />
+{/if}
 <g
   color="grey"
   stroke="grey"
