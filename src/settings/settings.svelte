@@ -3,6 +3,7 @@
   import { VNStorage } from "../vn/vn_storage";
   import { AVAILABLE_FONTS } from "../font_list";
   import BackupSettings from "./backup_settings.svelte";
+  import SettingsIo from "./settings_io.svelte";
 
   interface Props {
     vn_storage: VNStorage;
@@ -83,6 +84,8 @@
   </div>
 
   <BackupSettings />
+
+  <SettingsIo />
 </div>
 
 <style global lang="postcss">

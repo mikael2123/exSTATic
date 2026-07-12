@@ -1,7 +1,14 @@
 import * as browser from "webextension-polyfill";
 import { buildStatsCsv, buildLinesCsv } from "../data_wrangling/data_export";
 import {
-  ensureFolder,
+  buildSettingsPayload,
+  serializeSettingsFile,
+  settingsHashInput,
+} from "../data_wrangling/settings_io";
+import {
+  ensureStatsFolder,
+  ensureLinesFolder,
+  ensureSettingsFolder,
   createFile,
   updateFileContent,
   renameFile,
@@ -22,9 +29,17 @@ interface BackupMeta {
   rows: number;
   updatedAt: string;
 }
+// Settings backups are versioned (a new timestamped file per change), so they
+// only need the latest file id + content hash for change-detection.
+interface SettingsBackupMeta {
+  fileId: string;
+  hash: string;
+  updatedAt: string;
+}
 interface BackupIndex {
   stats?: BackupMeta;
   lines?: BackupMeta;
+  settings?: SettingsBackupMeta;
 }
 
 type BackupStatus = "skipped" | "updated" | "created" | "flagged";
@@ -78,25 +93,53 @@ async function backupOne(
   return "flagged";
 }
 
+// Settings aren't append-only like the CSVs, so an in-place overwrite would lose
+// history. Instead, when the settings change we write a brand-new timestamped
+// file (keeping every version), and skip entirely when nothing changed.
+async function backupSettings(
+  settingsFolderId: string,
+  index: BackupIndex,
+): Promise<BackupStatus> {
+  const payload = await buildSettingsPayload();
+  const hash = await sha256Hex(settingsHashInput(payload));
+  const prev = index.settings;
+
+  if (prev && hash === prev.hash) return "skipped";
+
+  const name = `exSTATic_settings_${stamp()}.json`;
+  const fileId = await createFile(
+    settingsFolderId,
+    name,
+    serializeSettingsFile(payload),
+    "application/json",
+  );
+  index.settings = { fileId, hash, updatedAt: new Date().toISOString() };
+  return "created";
+}
+
 export async function runBackup(
   reason: string = "scheduled",
 ): Promise<{
   ok: boolean;
   error?: string;
-  results?: { reason: string; stats: BackupStatus; lines: BackupStatus };
+  results?: {
+    reason: string;
+    stats: BackupStatus;
+    lines: BackupStatus;
+    settings: BackupStatus;
+  };
 }> {
   if (!(await isConnected())) {
     return { ok: false, error: "Google Drive is not connected." };
   }
 
   try {
-    const folderId = await ensureFolder();
     const stored = await browser.storage.local.get("backup_index");
     const index: BackupIndex = (stored["backup_index"] as BackupIndex) ?? {};
 
     const stats = await buildStatsCsv();
     const statsStatus = await backupOne(
-      folderId,
+      await ensureStatsFolder(),
       index,
       "stats",
       "exSTATic_stats.csv",
@@ -106,12 +149,17 @@ export async function runBackup(
 
     const lines = await buildLinesCsv();
     const linesStatus = await backupOne(
-      folderId,
+      await ensureLinesFolder(),
       index,
       "lines",
       "exSTATic_lines.csv",
       lines.csv,
       lines.rows,
+    );
+
+    const settingsStatus = await backupSettings(
+      await ensureSettingsFolder(),
+      index,
     );
 
     await browser.storage.local.set({
@@ -139,8 +187,42 @@ export async function runBackup(
 
     return {
       ok: true,
-      results: { reason, stats: statsStatus, lines: linesStatus },
+      results: {
+        reason,
+        stats: statsStatus,
+        lines: linesStatus,
+        settings: settingsStatus,
+      },
     };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? String(e) };
+  }
+}
+
+// A lightweight settings-only backup, used right before a settings import so the
+// previous state is versioned on Drive without rebuilding the large lines CSV.
+export async function runSettingsBackup(
+  reason: string = "manual",
+): Promise<{
+  ok: boolean;
+  error?: string;
+  results?: { reason: string; settings: BackupStatus };
+}> {
+  if (!(await isConnected())) {
+    return { ok: false, error: "Google Drive is not connected." };
+  }
+
+  try {
+    const stored = await browser.storage.local.get("backup_index");
+    const index: BackupIndex = (stored["backup_index"] as BackupIndex) ?? {};
+
+    const settingsStatus = await backupSettings(
+      await ensureSettingsFolder(),
+      index,
+    );
+
+    await browser.storage.local.set({ backup_index: index });
+    return { ok: true, results: { reason, settings: settingsStatus } };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? String(e) };
   }

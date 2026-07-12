@@ -4,6 +4,10 @@
     title: string;
     note?: string;
     issues?: string[];
+    // Heading shown above a non-empty issues list, and the message shown when
+    // the list is empty. Default to the import-cleaning wording.
+    issuesTitle?: string;
+    issuesEmpty?: string;
     progress?: { done: number; total: number } | null;
     onProceed?: (() => void) | undefined;
     onCancel?: (() => void) | undefined;
@@ -18,6 +22,8 @@
     title,
     note = "",
     issues = undefined,
+    issuesTitle = "Before importing — the file needed some processing:",
+    issuesEmpty = "The file looks standard. Nothing needed cleaning.",
     progress = null,
     onProceed = undefined,
     onCancel = undefined,
@@ -52,13 +58,13 @@
         <div class="max-h-60 overflow-auto bg-menu p-3 text-sm text-menu-text">
           {#if issues.length}
             <p class="mb-2 font-semibold">
-              Before importing — the file needed some processing:
+              {issuesTitle}
             </p>
             <ul class="list-disc pl-5">
               {#each issues as issue}<li>{issue}</li>{/each}
             </ul>
           {:else}
-            <p>The file looks standard. Nothing needed cleaning.</p>
+            <p>{issuesEmpty}</p>
           {/if}
         </div>
       {/if}

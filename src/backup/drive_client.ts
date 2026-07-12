@@ -12,11 +12,20 @@ async function authHeader(): Promise<{ Authorization: string }> {
   return { Authorization: `Bearer ${token}` };
 }
 
-export async function ensureFolder(): Promise<string> {
+// Find-or-create a folder by name, optionally scoped to a parent folder (so we
+// can nest per-type subfolders under exSTATic_backups).
+export async function ensureFolder(
+  name: string = FOLDER_NAME,
+  parentId?: string,
+): Promise<string> {
   const headers = await authHeader();
-  const q = encodeURIComponent(
-    `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-  );
+  const clauses = [
+    `name='${name}'`,
+    `mimeType='application/vnd.google-apps.folder'`,
+    `trashed=false`,
+  ];
+  if (parentId) clauses.push(`'${parentId}' in parents`);
+  const q = encodeURIComponent(clauses.join(" and "));
   const res = await fetch(`${FILES}?q=${q}&spaces=drive&fields=files(id,name)`, {
     headers,
   });
@@ -24,13 +33,15 @@ export async function ensureFolder(): Promise<string> {
   const data = await res.json();
   if (data.files && data.files.length > 0) return data.files[0].id;
 
+  const metadata: { name: string; mimeType: string; parents?: string[] } = {
+    name,
+    mimeType: "application/vnd.google-apps.folder",
+  };
+  if (parentId) metadata.parents = [parentId];
   const createRes = await fetch(`${FILES}?fields=id`, {
     method: "POST",
     headers: { ...headers, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: FOLDER_NAME,
-      mimeType: "application/vnd.google-apps.folder",
-    }),
+    body: JSON.stringify(metadata),
   });
   if (!createRes.ok) {
     throw new Error(`Drive folder create failed (${createRes.status}).`);
@@ -38,10 +49,23 @@ export async function ensureFolder(): Promise<string> {
   return (await createRes.json()).id;
 }
 
+// Per-type subfolders under exSTATic_backups, so stats / lines / settings
+// backups stay cleanly separated.
+export async function ensureStatsFolder(): Promise<string> {
+  return ensureFolder("stats", await ensureFolder());
+}
+export async function ensureLinesFolder(): Promise<string> {
+  return ensureFolder("lines", await ensureFolder());
+}
+export async function ensureSettingsFolder(): Promise<string> {
+  return ensureFolder("settings", await ensureFolder());
+}
+
 export async function createFile(
   folderId: string,
   name: string,
   content: string,
+  mime: string = "text/csv",
 ): Promise<string> {
   const headers = await authHeader();
   const boundary = "exstatic_" + Math.random().toString(36).slice(2);
@@ -51,7 +75,7 @@ export async function createFile(
     `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
     JSON.stringify(metadata) +
     `\r\n--${boundary}\r\n` +
-    `Content-Type: text/csv; charset=UTF-8\r\n\r\n` +
+    `Content-Type: ${mime}; charset=UTF-8\r\n\r\n` +
     content +
     `\r\n--${boundary}--`;
 

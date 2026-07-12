@@ -7,14 +7,20 @@ import {
   dataFetched,
   messagingConnected,
 } from "./messaging/socket_actions";
-import { runBackup } from "./backup/backup";
+import { runBackup, runSettingsBackup } from "./backup/backup";
 import {
   connectDrive,
   disconnectDrive,
   getRedirectUri,
   isConnected,
 } from "./backup/drive_auth";
-import { downloadFileText, ensureFolder, listFiles } from "./backup/drive_client";
+import {
+  downloadFileText,
+  ensureStatsFolder,
+  ensureLinesFolder,
+  ensureSettingsFolder,
+  listFiles,
+} from "./backup/drive_client";
 
 import * as browser from "webextension-polyfill";
 import type { Tabs } from "webextension-polyfill";
@@ -117,19 +123,17 @@ const fetchLatestFromDrive = async (): Promise<
     let statsFileId = index.stats?.fileId;
     let linesFileId = index.lines?.fileId;
 
-    if (!statsFileId || !linesFileId) {
-      const folderId = await ensureFolder();
-      const files = await listFiles(folderId);
-      if (!statsFileId) {
-        statsFileId = files.find((f) =>
-          f.name.toLowerCase().includes("stats"),
-        )?.id;
-      }
-      if (!linesFileId) {
-        linesFileId = files.find((f) =>
-          f.name.toLowerCase().includes("lines"),
-        )?.id;
-      }
+    if (!statsFileId) {
+      const files = await listFiles(await ensureStatsFolder());
+      statsFileId = files.find((f) =>
+        f.name.toLowerCase().includes("stats"),
+      )?.id;
+    }
+    if (!linesFileId) {
+      const files = await listFiles(await ensureLinesFolder());
+      linesFileId = files.find((f) =>
+        f.name.toLowerCase().includes("lines"),
+      )?.id;
     }
 
     if (!statsFileId && !linesFileId) {
@@ -147,6 +151,40 @@ const fetchLatestFromDrive = async (): Promise<
       : undefined;
 
     return { ok: true, statsCsv, linesCsv };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+};
+
+// Resolve the latest settings backup JSON from Google Drive: prefer the file id
+// recorded in backup_index, else list the settings subfolder (newest first) and
+// take the most recent exSTATic_settings_*.json.
+const fetchSettingsFromDrive = async (): Promise<
+  { ok: true; settingsJson: string } | { ok: false; error: string }
+> => {
+  try {
+    const stored = await browser.storage.local.get("backup_index");
+    const index =
+      (stored["backup_index"] as { settings?: { fileId: string } } | undefined) ??
+      {};
+
+    let fileId = index.settings?.fileId;
+    if (!fileId) {
+      const files = await listFiles(await ensureSettingsFolder());
+      fileId = files.find((f) =>
+        f.name.toLowerCase().includes("settings"),
+      )?.id;
+    }
+
+    if (!fileId) {
+      return {
+        ok: false,
+        error: 'No settings backup found on Drive — use "Backup now" first.',
+      };
+    }
+
+    const settingsJson = await downloadFileText(fileId);
+    return { ok: true, settingsJson };
   } catch (e) {
     return { ok: false, error: String(e) };
   }
@@ -173,6 +211,10 @@ browser.runtime.onMessage.addListener((message: any) => {
       return runBackup("pre_import");
     case "drive_fetch_latest":
       return fetchLatestFromDrive();
+    case "drive_fetch_settings":
+      return fetchSettingsFromDrive();
+    case "backup_settings_now":
+      return runSettingsBackup("pre_import");
   }
   return undefined;
 });

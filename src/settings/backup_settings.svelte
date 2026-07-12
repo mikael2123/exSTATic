@@ -83,7 +83,7 @@
     const res: any = await browser.runtime.sendMessage({ action: "backup_now" });
     busy = false;
     message = res.ok
-      ? `Backup complete (stats: ${res.results.stats}, lines: ${res.results.lines}).`
+      ? `Backup complete (stats: ${res.results.stats}, lines: ${res.results.lines}, settings: ${res.results.settings}).`
       : `Backup failed: ${res.error}`;
     await loadStatus();
   };

@@ -62,7 +62,7 @@ function csv_blob(csv: string, options: { [key: string]: string }) {
   return new Blob([withBom(csv)], options);
 }
 
-async function blob_download(blob: Blob, filename: string) {
+export async function blobDownload(blob: Blob, filename: string) {
   await browser.runtime.sendMessage({
     action: "download",
     url: !isChrome ? blob : URL.createObjectURL(blob),
@@ -72,14 +72,14 @@ async function blob_download(blob: Blob, filename: string) {
 
 export async function exportStats() {
   const { csv } = await buildStatsCsv();
-  await blob_download(csv_blob(csv, { type: "text/csv" }), "exSTATic_stats.csv");
+  await blobDownload(csv_blob(csv, { type: "text/csv" }), "exSTATic_stats.csv");
 }
 
 export async function exportLines(
   onProgress?: (done: number, total: number) => void,
 ) {
   const { csv } = await buildLinesCsv(onProgress);
-  await blob_download(
+  await blobDownload(
     csv_blob(csv, { type: "text/csv;charset=utf-8" }),
     "exSTATic_lines.csv",
   );
