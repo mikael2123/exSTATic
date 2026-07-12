@@ -87,9 +87,14 @@
       scale_extent[0] !== undefined &&
       scale_extent[1] !== undefined
     ) {
-      // Reading time / speed / chars are never negative — anchor the Y axis at 0
-      // so it never shows impossible negative values.
-      return scaleLinear().domain([0, scale_extent[1]]).range(y_range).nice();
+      // Scale dynamically to the data range so the trend fills the chart, but
+      // never let the axis start below 0 — reading time / speed / chars can't be
+      // negative, so a negative floor would be nonsensical.
+      const scale = scaleLinear().domain(scale_extent).range(y_range).nice();
+      if (scale.domain()[0] < 0) {
+        scale.domain([0, scale.domain()[1]]);
+      }
+      return scale;
     }
   });
   let r_scale = $derived.by(() => {
