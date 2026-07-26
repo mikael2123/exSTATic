@@ -117,6 +117,24 @@ export async function renameFile(
   if (!res.ok) throw new Error(`Drive rename failed (${res.status}).`);
 }
 
+// Server-side copy: Drive duplicates the file without the content ever crossing
+// the wire, so snapshotting the 36 MB lines backup costs one request instead of
+// a download plus a re-upload.
+export async function copyFile(
+  fileId: string,
+  newName: string,
+  folderId: string,
+): Promise<string> {
+  const headers = await authHeader();
+  const res = await fetch(`${FILES}/${fileId}/copy?fields=id`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: newName, parents: [folderId] }),
+  });
+  if (!res.ok) throw new Error(`Drive copy failed (${res.status}).`);
+  return (await res.json()).id;
+}
+
 export async function downloadFileText(fileId: string): Promise<string> {
   const headers = await authHeader();
   const res = await fetch(`${FILES}/${fileId}?alt=media`, { headers });

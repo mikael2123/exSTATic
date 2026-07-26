@@ -11,16 +11,19 @@ import {
   ensureSettingsFolder,
   createFile,
   updateFileContent,
-  renameFile,
+  copyFile,
 } from "./drive_client";
 import { isConnected } from "./drive_auth";
 
 // Retention: "changed-copy + flag".
 // - unchanged                  -> skip
 // - grew (bigger + more rows)  -> overwrite the active backup file in place
-// - anything else (shrank /    -> keep the previous backup as a dated snapshot,
-//   rows dropped / same size      write the current data as a fresh active file,
+// - anything else (shrank /    -> copy the previous backup aside as a dated
+//   rows dropped / same size      snapshot, overwrite the active file in place,
 //   different content)            and raise an alert for the user to inspect.
+//
+// Both write paths update the active file by its existing fileId and never
+// re-create it, so its name and id are stable for the lifetime of the backup.
 
 interface BackupMeta {
   fileId: string;
@@ -84,12 +87,22 @@ async function backupOne(
     return "updated";
   }
 
-  // Non-append change: preserve the old backup, start a fresh active file, flag.
+  // Non-append change: preserve the old backup, then overwrite in place, flag.
+  //
+  // The snapshot is a *copy* of the previous file rather than a rename of it,
+  // so the active file keeps its name and fileId. Renaming it and creating a
+  // replacement briefly left two files wanting the same name; Drive allows that
+  // (it keys on fileId) but Google Drive for Desktop cannot, so the local mirror
+  // was left as "exSTATic_stats (1).csv" and never renamed back, breaking tools
+  // that read it by name.
+  //
+  // Copy before update: if the update then fails, the old content still exists
+  // in both files. Updating first would destroy it if the copy failed.
   const snapshotName =
     activeName.replace(/\.csv$/, "") + `_snapshot_${stamp()}.csv`;
-  await renameFile(prev.fileId, snapshotName);
-  const fileId = await createFile(folderId, activeName, csv);
-  index[key] = { fileId, length, hash, rows, updatedAt: now };
+  await copyFile(prev.fileId, snapshotName, folderId);
+  await updateFileContent(prev.fileId, csv);
+  index[key] = { fileId: prev.fileId, length, hash, rows, updatedAt: now };
   return "flagged";
 }
 
