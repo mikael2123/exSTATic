@@ -45,6 +45,76 @@ export function changeCount(summary: ChangeSummary): number {
   );
 }
 
+// ---- the alert record ----
+
+// What gets persisted for the user to look at. The flag itself stays broad and
+// cheap; the point of the detail is that the user can judge the change rather
+// than being told "something unexpected happened" and learning to dismiss it.
+export interface AlertDetail {
+  totals: {
+    added: number;
+    removed: number;
+    increased: number;
+    decreased: number;
+  };
+  removed: string[];
+  decreased: FieldChange[];
+  added: string[];
+  increased: FieldChange[];
+  truncated: boolean;
+}
+
+export interface BackupAlert {
+  message: string;
+  at: string;
+  detail?: AlertDetail;
+}
+
+// Merges the per-file summaries and trims them to something that can live in
+// extension storage — a force-import can change thousands of rows at once.
+export function buildAlertDetail(
+  summaries: ChangeSummary[],
+  limit: number = 50,
+): AlertDetail {
+  const merged = emptySummary();
+  for (const s of summaries) {
+    merged.added.push(...s.added);
+    merged.removed.push(...s.removed);
+    merged.increased.push(...s.increased);
+    merged.decreased.push(...s.decreased);
+  }
+
+  // Suspicious entries are taken first, so a decrease is never crowded out of
+  // the list by thousands of ordinary additions — it is the reason for the flag.
+  let budget = limit;
+  const take = <T>(items: T[]): T[] => {
+    const slice = items.slice(0, Math.max(0, budget));
+    budget -= slice.length;
+    return slice;
+  };
+
+  const decreased = take(merged.decreased);
+  const removed = take(merged.removed);
+  const increased = take(merged.increased);
+  const added = take(merged.added);
+  const shown =
+    decreased.length + removed.length + increased.length + added.length;
+
+  return {
+    totals: {
+      added: merged.added.length,
+      removed: merged.removed.length,
+      increased: merged.increased.length,
+      decreased: merged.decreased.length,
+    },
+    decreased,
+    removed,
+    increased,
+    added,
+    truncated: shown < changeCount(merged),
+  };
+}
+
 // ---- stats ----
 
 // Cumulative per-day totals, which can only ever grow. read_speed is excluded on
@@ -136,7 +206,12 @@ export function compareLineCounts(
       continue;
     }
     if (count === before) continue;
-    const change = { label: label(uuid), field: "lines", from: before, to: count };
+    const change = {
+      label: label(uuid),
+      field: "lines",
+      from: before,
+      to: count,
+    };
     if (count < before) summary.decreased.push(change);
     else summary.increased.push(change);
   }

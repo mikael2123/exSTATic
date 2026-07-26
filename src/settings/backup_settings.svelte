@@ -13,9 +13,34 @@
   let redirectUri = $state("");
   let connected = $state(false);
   let lastRun = $state<string | null>(null);
-  let alertMsg = $state<string | null>(null);
   let busy = $state(false);
   let message = $state("");
+
+  // ---- Backup alert ----
+  // Alerts used to be a bare string; they now carry the changes that triggered
+  // the flag. Both shapes are handled so an alert stored by an older build
+  // still displays instead of disappearing.
+  let backupAlert = $state<any>(null);
+  const alertMsg = $derived(
+    typeof backupAlert === "string"
+      ? backupAlert
+      : (backupAlert?.message ?? null),
+  );
+  const alertDetail = $derived(
+    typeof backupAlert === "string" ? null : (backupAlert?.detail ?? null),
+  );
+
+  const FIELD_LABELS: { [field: string]: string } = {
+    chars_read: "characters",
+    lines_read: "lines",
+    time_read: "time",
+    lines: "lines stored",
+  };
+  const fieldLabel = (field: string) => FIELD_LABELS[field] ?? field;
+  const fieldValue = (field: string, value: number) =>
+    field === "time_read"
+      ? `${Math.round(value).toLocaleString()}s`
+      : Math.round(value).toLocaleString();
 
   // ---- Import from Drive: confirmation + progress modal ----
   let modalOpen = $state(false);
@@ -52,7 +77,7 @@
     connected = status.connected;
     redirectUri = status.redirectUri;
     lastRun = status.lastRun;
-    alertMsg = status.alert;
+    backupAlert = status.alert;
   };
 
   const saveConfig = async () => {
@@ -80,7 +105,9 @@
   const backupNow = async () => {
     busy = true;
     message = "Backing up to Google Drive…";
-    const res: any = await browser.runtime.sendMessage({ action: "backup_now" });
+    const res: any = await browser.runtime.sendMessage({
+      action: "backup_now",
+    });
     busy = false;
     message = res.ok
       ? `Backup complete (stats: ${res.results.stats}, lines: ${res.results.lines}, settings: ${res.results.settings}).`
@@ -155,7 +182,7 @@
 
   const dismissAlert = async () => {
     await browser.storage.local.remove("backup_alert");
-    alertMsg = null;
+    backupAlert = null;
   };
 
   const copyRedirect = async () => {
@@ -174,9 +201,70 @@
   <h2 class="text-2xl font-semibold">Google Drive Backups</h2>
 
   {#if alertMsg}
-    <div class="flex items-center justify-between gap-3 bg-amber-700 p-3 text-white">
-      <span>⚠ {alertMsg}</span>
-      <button class="bg-button px-3 py-1" onclick={dismissAlert}>Dismiss</button>
+    <div class="flex flex-col gap-2 bg-amber-700 p-3 text-white">
+      <div class="flex items-start justify-between gap-3">
+        <span>⚠ {alertMsg}</span>
+        <button class="shrink-0 bg-button px-3 py-1" onclick={dismissAlert}
+          >Dismiss</button
+        >
+      </div>
+
+      {#if alertDetail}
+        <details class="text-sm">
+          <summary class="cursor-pointer font-semibold">What changed</summary>
+          <div class="mt-2 flex flex-col gap-3">
+            {#if alertDetail.decreased.length || alertDetail.removed.length}
+              <div>
+                <p class="font-semibold">Went backwards or disappeared</p>
+                <ul class="ml-5 list-disc">
+                  {#each alertDetail.decreased as change}
+                    <li>
+                      {change.label} — {fieldLabel(change.field)}
+                      {fieldValue(change.field, change.from)} → {fieldValue(
+                        change.field,
+                        change.to,
+                      )}
+                    </li>
+                  {/each}
+                  {#each alertDetail.removed as label}
+                    <li>{label} — no longer present</li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+
+            {#if alertDetail.increased.length || alertDetail.added.length}
+              <div>
+                <p class="font-semibold">Also changed (normal reading)</p>
+                <ul class="ml-5 list-disc">
+                  {#each alertDetail.increased as change}
+                    <li>
+                      {change.label} — {fieldLabel(change.field)}
+                      {fieldValue(change.field, change.from)} → {fieldValue(
+                        change.field,
+                        change.to,
+                      )}
+                    </li>
+                  {/each}
+                  {#each alertDetail.added as label}
+                    <li>{label} — new</li>
+                  {/each}
+                </ul>
+              </div>
+            {/if}
+
+            {#if alertDetail.truncated}
+              <p class="italic">
+                Only part of the list is shown. In total:
+                {alertDetail.totals.decreased} decreased,
+                {alertDetail.totals.removed} removed,
+                {alertDetail.totals.increased} increased,
+                {alertDetail.totals.added} added.
+              </p>
+            {/if}
+          </div>
+        </details>
+      {/if}
     </div>
   {/if}
 
@@ -197,7 +285,9 @@
   <div class="flex flex-col gap-1">
     <span>Redirect URI — add this to your Google OAuth client:</span>
     <div class="flex items-center gap-2">
-      <code class="grow break-all bg-menu p-2 text-menu-text">{redirectUri}</code>
+      <code class="grow break-all bg-menu p-2 text-menu-text"
+        >{redirectUri}</code
+      >
       <button class="bg-button px-3 py-1" onclick={copyRedirect}>Copy</button>
     </div>
   </div>

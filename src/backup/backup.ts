@@ -20,7 +20,9 @@ import {
   compareStats,
   compareLineCounts,
   isSafeChange,
+  buildAlertDetail,
   type ChangeSummary,
+  type BackupAlert,
 } from "./change_check";
 
 // Retention: "changed-copy + flag".
@@ -167,9 +169,7 @@ async function backupSettings(
   return "created";
 }
 
-export async function runBackup(
-  reason: string = "scheduled",
-): Promise<{
+export async function runBackup(reason: string = "scheduled"): Promise<{
   ok: boolean;
   error?: string;
   results?: {
@@ -256,20 +256,26 @@ export async function runBackup(
         (n, s) => n + s.removed.length + s.decreased.length,
         0,
       );
-      const detail = unexpected
+      const counted = unexpected
         ? ` ${unexpected} ${unexpected === 1 ? "entry" : "entries"} went backwards or disappeared.`
         : "";
-      const alert =
+      const message =
         `Backup on ${new Date().toLocaleString()} saw an unexpected change ` +
-        `(stats: ${statsStatus}, lines: ${linesStatus}).${detail} ` +
+        `(stats: ${statsStatus}, lines: ${linesStatus}).${counted} ` +
         `A dated snapshot of the previous backup was kept in Google Drive so nothing is lost.`;
+
+      const alert: BackupAlert = {
+        message,
+        at: new Date().toISOString(),
+        detail: summaries.length ? buildAlertDetail(summaries) : undefined,
+      };
       await browser.storage.local.set({ backup_alert: alert });
       try {
         await browser.notifications.create({
           type: "basic",
           iconUrl: browser.runtime.getURL("docs/favicon_100x100.png"),
           title: "exSTATic backup — please check your data",
-          message: alert,
+          message,
         });
       } catch (_) {
         // notifications are best-effort
@@ -292,9 +298,7 @@ export async function runBackup(
 
 // A lightweight settings-only backup, used right before a settings import so the
 // previous state is versioned on Drive without rebuilding the large lines CSV.
-export async function runSettingsBackup(
-  reason: string = "manual",
-): Promise<{
+export async function runSettingsBackup(reason: string = "manual"): Promise<{
   ok: boolean;
   error?: string;
   results?: { reason: string; settings: BackupStatus };
