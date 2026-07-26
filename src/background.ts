@@ -261,10 +261,6 @@ browser.runtime.onMessage.addListener((message: any) => {
       return fetchSettingsFromDrive();
     case "backup_settings_now":
       return runSettingsBackup("pre_import");
-    case "set_listen_status":
-      return applyListenStatus(message.listening === true);
-    case "get_listen_status":
-      return isListening().then((listening) => ({ listening }));
   }
   return undefined;
 });

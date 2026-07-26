@@ -28,27 +28,13 @@
   let lines: string[][] = $state([]);
   let menu = $state(false);
 
-  // ---- Pause tracking ----
-  // Shares the toolbar icon's listen_status flag, so pausing here also stops
-  // lines reaching storage and shows on the icon. Persisted, so a paused game
-  // is still paused after a reload.
-  let paused = $state(false);
-  const syncPaused = async () => {
-    paused = !(await vn_storage.extensionActivated());
-  };
-  syncPaused();
-
-  // The toolbar icon toggles the same flag, so mirror changes made elsewhere.
-  browser.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && changes["listen_status"]) {
-      paused = changes["listen_status"].newValue === false;
-    }
-  });
-
-  const togglePause = async () => {
-    paused = !paused;
-    await vn_storage.setPaused(paused);
-  };
+  // ---- Reading timer ----
+  // The pause button is a view of the timer that double-clicking and the AFK
+  // timeout already drive, so it shows the true state whatever stopped it. It is
+  // deliberately unrelated to the toolbar icon, which decides whether lines are
+  // captured at all and leaves the timer alone. Starts false: the ticker is
+  // stopped until the first line or an explicit start.
+  let tracking = $state(false);
 
   // Events for media being added/replaced
   document.addEventListener("media_changed", (event: CustomEvent) => {
@@ -216,6 +202,7 @@
   };
 
   document.addEventListener("status_active", () => {
+    tracking = true;
     document.documentElement.style.setProperty(
       "--default-inactivity-blur",
       "0",
@@ -223,6 +210,7 @@
   });
 
   document.addEventListener("status_inactive", () => {
+    tracking = false;
     document.documentElement.style.setProperty(
       "--default-inactivity-blur",
       vn_storage.properties["inactivity_blur"] + "px",
@@ -268,15 +256,6 @@
   />
   <div class="relative">
     <StatBar media_storage={vn_storage}>
-      <button
-        id="pause_tracking"
-        class="material-icons rounded-full hover:bg-hover"
-        title={paused ? "Resume tracking" : "Pause tracking"}
-        aria-label={paused ? "Resume tracking" : "Pause tracking"}
-        onclick={togglePause}
-      >
-        {paused ? "play_circle" : "pause_circle"}
-      </button>
       <button
         class="material-icons rounded-full hover:bg-hover"
         onclick={() => (menu = !menu)}>more_vert</button
@@ -380,11 +359,24 @@
       >
     </MenuBar>
   </div>
-  <button
-    id="delete-selection"
-    class="material-icons delete-button"
-    onclick={deleteLines}>delete</button
-  >
+  <div class="flex shrink-0 items-center gap-1">
+    <!-- Outside the stat bar on purpose: that bar carries the menu blur, and a
+         pause indicator you have to hover to read defeats the point of it. -->
+    <button
+      id="pause_tracking"
+      class="material-icons tracker-button"
+      title={tracking ? "Pause reading timer" : "Resume reading timer"}
+      aria-label={tracking ? "Pause reading timer" : "Resume reading timer"}
+      onclick={() => vn_storage.toggleActive()}
+    >
+      {tracking ? "pause_circle" : "play_circle"}
+    </button>
+    <button
+      id="delete-selection"
+      class="material-icons delete-button"
+      onclick={deleteLines}>delete</button
+    >
+  </div>
 </div>
 
 <div
@@ -466,6 +458,11 @@
 
   .delete-button {
     @apply inline-flex self-center rounded-full border-indigo-500 p-2 text-button-text hover:bg-hover hover:text-icon;
+  }
+
+  /* Never blurred — see the comment on the pause button. */
+  .tracker-button {
+    @apply inline-flex self-center rounded-full p-2 text-button-text hover:bg-hover hover:text-icon;
   }
 
   .line-select {
