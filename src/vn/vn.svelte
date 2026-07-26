@@ -28,6 +28,28 @@
   let lines: string[][] = $state([]);
   let menu = $state(false);
 
+  // ---- Pause tracking ----
+  // Shares the toolbar icon's listen_status flag, so pausing here also stops
+  // lines reaching storage and shows on the icon. Persisted, so a paused game
+  // is still paused after a reload.
+  let paused = $state(false);
+  const syncPaused = async () => {
+    paused = !(await vn_storage.extensionActivated());
+  };
+  syncPaused();
+
+  // The toolbar icon toggles the same flag, so mirror changes made elsewhere.
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes["listen_status"]) {
+      paused = changes["listen_status"].newValue === false;
+    }
+  });
+
+  const togglePause = async () => {
+    paused = !paused;
+    await vn_storage.setPaused(paused);
+  };
+
   // Events for media being added/replaced
   document.addEventListener("media_changed", (event: CustomEvent) => {
     // Show name and title
@@ -140,8 +162,7 @@
         const { cleaned, report } = validateLines(result.data as LineRow[]);
 
         modalTitle = "Import Lines";
-        modalNote =
-          "This adds these lines to storage. A backup is made first.";
+        modalNote = "This adds these lines to storage. A backup is made first.";
         modalIssues = report.issues;
         modalProgress = null;
         modalForce = false;
@@ -247,6 +268,15 @@
   />
   <div class="relative">
     <StatBar media_storage={vn_storage}>
+      <button
+        id="pause_tracking"
+        class="material-icons rounded-full hover:bg-hover"
+        title={paused ? "Resume tracking" : "Pause tracking"}
+        aria-label={paused ? "Resume tracking" : "Pause tracking"}
+        onclick={togglePause}
+      >
+        {paused ? "play_circle" : "pause_circle"}
+      </button>
       <button
         class="material-icons rounded-full hover:bg-hover"
         onclick={() => (menu = !menu)}>more_vert</button
@@ -388,8 +418,8 @@
     {#if modalForce}
       <p class="bg-amber-700 p-2 text-sm text-white">
         ⚠ Are you sure? This permanently deletes your current
-        {modalTitle.includes("Lines") ? "lines" : "stats"} before importing. A
-        backup is still made first.
+        {modalTitle.includes("Lines") ? "lines" : "stats"} before importing. A backup
+        is still made first.
       </p>
     {/if}
   {/if}

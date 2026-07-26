@@ -165,15 +165,14 @@ const fetchSettingsFromDrive = async (): Promise<
   try {
     const stored = await browser.storage.local.get("backup_index");
     const index =
-      (stored["backup_index"] as { settings?: { fileId: string } } | undefined) ??
-      {};
+      (stored["backup_index"] as
+        | { settings?: { fileId: string } }
+        | undefined) ?? {};
 
     let fileId = index.settings?.fileId;
     if (!fileId) {
       const files = await listFiles(await ensureSettingsFolder());
-      fileId = files.find((f) =>
-        f.name.toLowerCase().includes("settings"),
-      )?.id;
+      fileId = files.find((f) => f.name.toLowerCase().includes("settings"))?.id;
     }
 
     if (!fileId) {
@@ -215,38 +214,39 @@ browser.runtime.onMessage.addListener((message: any) => {
       return fetchSettingsFromDrive();
     case "backup_settings_now":
       return runSettingsBackup("pre_import");
+    case "set_listen_status":
+      return applyListenStatus(message.listening === true);
+    case "get_listen_status":
+      return isListening().then((listening) => ({ listening }));
   }
   return undefined;
 });
 
-browser.action.onClicked.addListener(async () => {
-  const listen_status = (await browser.storage.local.get("listen_status"))[
+// Capture toggle. The toolbar icon and the tracker page's pause button drive
+// this same flag, so the two can never disagree about whether we're recording.
+const isListening = async () => {
+  const status = (await browser.storage.local.get("listen_status"))[
     "listen_status"
   ];
+  return status == true || status === undefined;
+};
 
-  if (listen_status == true || listen_status === undefined) {
-    await browser.action.setIcon({
-      path: {
-        "100": "/docs/disabled_100x100.png",
-        "500": "/docs/disabled.png",
-      },
-    });
+const applyListenStatus = async (listening: boolean) => {
+  await browser.action.setIcon({
+    path: listening
+      ? { "100": "/docs/favicon_100x100.png", "500": "/docs/favicon.png" }
+      : { "100": "/docs/disabled_100x100.png", "500": "/docs/disabled.png" },
+  });
+  await browser.storage.local.set({ listen_status: listening });
+  return { ok: true, listening };
+};
 
-    await browser.storage.local.set({
-      listen_status: false,
-    });
-  } else {
-    await browser.action.setIcon({
-      path: {
-        "100": "/docs/favicon_100x100.png",
-        "500": "/docs/favicon.png",
-      },
-    });
+// The flag persists across restarts, so restore the icon to match it — a paused
+// profile must not come back looking like it is recording.
+isListening().then(applyListenStatus);
 
-    await browser.storage.local.set({
-      listen_status: true,
-    });
-  }
+browser.action.onClicked.addListener(async () => {
+  await applyListenStatus(!(await isListening()));
 });
 
 let socket = new ReconnectingWebSocket("ws://localhost:9001");

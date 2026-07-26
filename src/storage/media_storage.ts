@@ -142,9 +142,12 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
 
     // Keep incrementing the time read counter whilst the max afk time isn't exceeded
     if (time_between_lines <= this.properties.afk_max_time) {
-      await this.instance_storage.addDailyStats(this.instance_storage.currentDay(), {
-        time_read: time_between_ticks,
-      });
+      await this.instance_storage.addDailyStats(
+        this.instance_storage.currentDay(),
+        {
+          time_read: time_between_ticks,
+        },
+      );
       this.start_ticker();
     } else {
       this.stop_ticker();
@@ -156,6 +159,32 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
       "listen_status"
     ];
     return listen_status == true || listen_status === undefined;
+  }
+
+  // Pause/resume capture, backed by the same listen_status flag as the toolbar
+  // icon so the page and the icon always agree and the state survives a reload.
+  // While paused the background drops incoming lines, so nothing can restart the
+  // ticker behind our back.
+  async setPaused(paused: boolean) {
+    await browser.runtime.sendMessage({
+      action: "set_listen_status",
+      listening: !paused,
+    });
+
+    if (paused) {
+      // Stop counting immediately rather than waiting out the AFK timeout.
+      this.stop_ticker();
+      return;
+    }
+
+    // Resuming counts as activity: without this the break just taken would read
+    // as AFK time and stop the ticker again on its very next tick.
+    if (this.instance_storage) {
+      await this.instance_storage.updateDetails({
+        last_active_at: timeNowSeconds(),
+      });
+    }
+    this.start_ticker();
   }
 
   async toggleActive() {
