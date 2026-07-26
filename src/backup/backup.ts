@@ -12,8 +12,16 @@ import {
   createFile,
   updateFileContent,
   copyFile,
+  downloadFileText,
 } from "./drive_client";
 import { isConnected } from "./drive_auth";
+import {
+  parseStatsCsv,
+  compareStats,
+  compareLineCounts,
+  isSafeChange,
+  type ChangeSummary,
+} from "./change_check";
 
 // Retention: "changed-copy + flag".
 // - unchanged                  -> skip
@@ -31,6 +39,9 @@ interface BackupMeta {
   hash: string;
   rows: number;
   updatedAt: string;
+  // Lines only: per-media line counts, compared instead of re-downloading the
+  // (very large) lines CSV. Absent on indexes written before this existed.
+  lineCounts?: { [uuid: string]: number };
 }
 // Settings backups are versioned (a new timestamped file per change), so they
 // only need the latest file id + content hash for change-detection.
@@ -46,6 +57,27 @@ interface BackupIndex {
 }
 
 type BackupStatus = "skipped" | "updated" | "created" | "flagged";
+
+interface BackupOutcome {
+  status: BackupStatus;
+  summary?: ChangeSummary;
+}
+
+interface Verdict {
+  safe: boolean;
+  summary?: ChangeSummary;
+}
+
+// Decides whether the change since the last backup is expected. Per-type,
+// because stats and lines are compared by different means.
+type Classifier = (prev: BackupMeta) => Promise<Verdict>;
+
+// The original heuristic, kept only as a fallback for when a keyed comparison
+// isn't possible: the first run after the change check was added (no stored
+// fingerprint yet) or a Drive read that failed. It errs towards flagging.
+function grewByBytes(prev: BackupMeta, length: number, rows: number): Verdict {
+  return { safe: length > prev.length && rows >= prev.rows };
+}
 
 async function sha256Hex(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
@@ -66,25 +98,30 @@ async function backupOne(
   activeName: string,
   csv: string,
   rows: number,
-): Promise<BackupStatus> {
+  classify: Classifier,
+  meta: Partial<BackupMeta> = {},
+): Promise<BackupOutcome> {
   const hash = await sha256Hex(csv);
   const length = csv.length;
   const prev = index[key];
   const now = new Date().toISOString();
 
+  const record = (fileId: string) => {
+    index[key] = { fileId, length, hash, rows, updatedAt: now, ...meta };
+  };
+
   if (!prev) {
-    const fileId = await createFile(folderId, activeName, csv);
-    index[key] = { fileId, length, hash, rows, updatedAt: now };
-    return "created";
+    record(await createFile(folderId, activeName, csv));
+    return { status: "created" };
   }
 
-  if (hash === prev.hash) return "skipped";
+  if (hash === prev.hash) return { status: "skipped" };
 
-  const grew = length > prev.length && rows >= prev.rows;
-  if (grew) {
+  const verdict = await classify(prev);
+  if (verdict.safe) {
     await updateFileContent(prev.fileId, csv);
-    index[key] = { fileId: prev.fileId, length, hash, rows, updatedAt: now };
-    return "updated";
+    record(prev.fileId);
+    return { status: "updated" };
   }
 
   // Non-append change: preserve the old backup, then overwrite in place, flag.
@@ -102,8 +139,8 @@ async function backupOne(
     activeName.replace(/\.csv$/, "") + `_snapshot_${stamp()}.csv`;
   await copyFile(prev.fileId, snapshotName, folderId);
   await updateFileContent(prev.fileId, csv);
-  index[key] = { fileId: prev.fileId, length, hash, rows, updatedAt: now };
-  return "flagged";
+  record(prev.fileId);
+  return { status: "flagged", summary: verdict.summary };
 }
 
 // Settings aren't append-only like the CSVs, so an in-place overwrite would lose
@@ -151,24 +188,55 @@ export async function runBackup(
     const index: BackupIndex = (stored["backup_index"] as BackupIndex) ?? {};
 
     const stats = await buildStatsCsv();
-    const statsStatus = await backupOne(
+    const statsOutcome = await backupOne(
       await ensureStatsFolder(),
       index,
       "stats",
       "exSTATic_stats.csv",
       stats.csv,
       stats.rows,
+      // Small enough (~80 KB) to re-read the previous backup and compare it row
+      // by row. That is authoritative — it checks against what is actually on
+      // Drive rather than a local record that could have drifted from it — and
+      // it is the same content the flag diff needs.
+      async (prev) => {
+        try {
+          const summary = compareStats(
+            parseStatsCsv(await downloadFileText(prev.fileId)),
+            parseStatsCsv(stats.csv),
+          );
+          return { safe: isSafeChange(summary), summary };
+        } catch (_) {
+          return grewByBytes(prev, stats.csv.length, stats.rows);
+        }
+      },
     );
+    const statsStatus = statsOutcome.status;
 
     const lines = await buildLinesCsv();
-    const linesStatus = await backupOne(
+    const linesOutcome = await backupOne(
       await ensureLinesFolder(),
       index,
       "lines",
       "exSTATic_lines.csv",
       lines.csv,
       lines.rows,
+      // Too large to re-download, so per-media line counts recorded on the last
+      // run are the reference instead.
+      async (prev) => {
+        if (!prev.lineCounts) {
+          return grewByBytes(prev, lines.csv.length, lines.rows);
+        }
+        const summary = compareLineCounts(
+          prev.lineCounts,
+          lines.counts,
+          lines.names,
+        );
+        return { safe: isSafeChange(summary), summary };
+      },
+      { lineCounts: lines.counts },
     );
+    const linesStatus = linesOutcome.status;
 
     const settingsStatus = await backupSettings(
       await ensureSettingsFolder(),
@@ -181,9 +249,19 @@ export async function runBackup(
     });
 
     if (statsStatus === "flagged" || linesStatus === "flagged") {
+      const summaries = [statsOutcome.summary, linesOutcome.summary].filter(
+        (s): s is ChangeSummary => !!s,
+      );
+      const unexpected = summaries.reduce(
+        (n, s) => n + s.removed.length + s.decreased.length,
+        0,
+      );
+      const detail = unexpected
+        ? ` ${unexpected} ${unexpected === 1 ? "entry" : "entries"} went backwards or disappeared.`
+        : "";
       const alert =
         `Backup on ${new Date().toLocaleString()} saw an unexpected change ` +
-        `(stats: ${statsStatus}, lines: ${linesStatus}). ` +
+        `(stats: ${statsStatus}, lines: ${linesStatus}).${detail} ` +
         `A dated snapshot of the previous backup was kept in Google Drive so nothing is lost.`;
       await browser.storage.local.set({ backup_alert: alert });
       try {

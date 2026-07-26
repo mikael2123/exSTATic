@@ -18,12 +18,19 @@ export async function buildStatsCsv(): Promise<{ csv: string; rows: number }> {
   return { csv: withBom(unparse(data)), rows: data.length };
 }
 
+// Also reports per-media line counts (and names for display), which the backup
+// change check uses instead of re-downloading the whole lines CSV to compare.
 export async function buildLinesCsv(
   onProgress?: (done: number, total: number) => void,
-): Promise<{ csv: string; rows: number }> {
+): Promise<{
+  csv: string;
+  rows: number;
+  counts: { [uuid: string]: number };
+  names: { [uuid: string]: string };
+}> {
   const media = await browser.storage.local.get("media");
   if (!media.hasOwnProperty("media")) {
-    return { csv: withBom(""), rows: 0 };
+    return { csv: withBom(""), rows: 0, counts: {}, names: {} };
   }
 
   const uuids = Object.values(media["media"]) as string[];
@@ -38,17 +45,21 @@ export async function buildLinesCsv(
   );
 
   let rows: { [key: string]: unknown }[] = [];
+  const counts: { [uuid: string]: number } = {};
+  const names: { [uuid: string]: string } = {};
   let done = 0;
-  for (const entry of entries) {
-    const instance_rows = await getInstanceData(entry);
+  for (const [uuid, details] of entries) {
+    const instance_rows = await getInstanceData([uuid, details]);
     if (instance_rows) {
       rows.push(...instance_rows);
+      counts[uuid] = instance_rows.length;
+      names[uuid] = details?.name ?? uuid;
       done += instance_rows.length;
     }
     onProgress?.(done, total);
   }
 
-  return { csv: withBom(unparse(rows)), rows: rows.length };
+  return { csv: withBom(unparse(rows)), rows: rows.length, counts, names };
 }
 
 // ---- Download path (content script asks the background to do the download) ----
