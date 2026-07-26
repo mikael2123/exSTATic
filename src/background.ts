@@ -8,6 +8,7 @@ import {
   messagingConnected,
 } from "./messaging/socket_actions";
 import { runBackup, runSettingsBackup } from "./backup/backup";
+import { nextBackupTime } from "./calculations";
 import {
   connectDrive,
   disconnectDrive,
@@ -77,16 +78,62 @@ browser.runtime.onInstalled.addListener(async () => {
 
 // Backup scheduling: an alarm wakes the (non-persistent) background page even
 // when no exSTATic page is open, and runs regardless of the capture toggle.
+//
+// Runs are anchored to the "day starts at" rollover instead of to whenever the
+// browser happened to start, so the first backup of each immersion day lands
+// just after that day begins and the rest follow at a fixed spacing from it.
 const BACKUP_ALARM = "daily_backup";
-const ensureBackupAlarm = async () => {
-  if (!(await browser.alarms.get(BACKUP_ALARM))) {
-    // Fires roughly every 6h; a missed alarm fires on the next browser start.
-    browser.alarms.create(BACKUP_ALARM, { periodInMinutes: 360 });
+const BACKUP_PERIOD_HOURS = 6;
+
+const rolloverHours = async (): Promise<number> => {
+  const vn = (await browser.storage.local.get("vn"))["vn"] as
+    | { day_rollover_hours?: number }
+    | undefined;
+  return vn?.day_rollover_hours ?? 0;
+};
+
+// A one-shot alarm rescheduled after each run, rather than a repeating one:
+// re-deriving the slot every time re-anchors it, so a changed rollover hour or a
+// daylight-saving shift is absorbed instead of accumulating as drift. The slot
+// is a function of the rollover hour alone, so recomputing it whenever the
+// background page restarts always yields the same instant.
+const scheduleBackupAlarm = async () => {
+  const when = nextBackupTime(await rolloverHours(), BACKUP_PERIOD_HOURS);
+  await browser.alarms.clear(BACKUP_ALARM);
+  browser.alarms.create(BACKUP_ALARM, { when: when.getTime() });
+};
+
+// A periodic alarm used to fire late on the next browser start if a run was
+// missed. One-shot alarms are always scheduled ahead, so catch up explicitly:
+// if the last run is older than a full period, back up now.
+const catchUpBackup = async () => {
+  const last = (await browser.storage.local.get("backup_last_run"))[
+    "backup_last_run"
+  ] as string | undefined;
+  if (!last) return;
+
+  const age = Date.now() - new Date(last).getTime();
+  if (Number.isFinite(age) && age >= BACKUP_PERIOD_HOURS * 60 * 60 * 1000) {
+    await runBackup("startup_catch_up");
   }
 };
-ensureBackupAlarm();
-browser.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === BACKUP_ALARM) runBackup("scheduled");
+
+scheduleBackupAlarm().then(catchUpBackup);
+
+browser.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== BACKUP_ALARM) return;
+  await runBackup("scheduled");
+  await scheduleBackupAlarm();
+});
+
+// Re-anchor as soon as the rollover setting changes, rather than leaving the
+// alarm on the old schedule until the next run.
+browser.storage.onChanged.addListener(async (changes, area) => {
+  if (area !== "local" || !changes["vn"]) return;
+  type Rollover = { day_rollover_hours?: number } | undefined;
+  const before = (changes["vn"].oldValue as Rollover)?.day_rollover_hours;
+  const after = (changes["vn"].newValue as Rollover)?.day_rollover_hours;
+  if (before !== after) await scheduleBackupAlarm();
 });
 
 const driveStatus = async () => {
