@@ -26,6 +26,9 @@ export interface TypeProperties {
   // Hours past midnight that a new "immersion day" starts (default 0 = midnight).
   // Optional because objects stored before this setting existed won't have it.
   day_rollover_hours?: number;
+  // Lines with at least this many counted characters get a ⚡ marker in the tracker.
+  // 0 (the default) disables the marker. Display-only — never affects stats.
+  skip_flag_min_chars?: number;
 }
 
 export class TypeStorage {

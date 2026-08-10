@@ -81,6 +81,13 @@
       value="8"
       root_css="--default-menu-blur"
     />
+    <MenuOption
+      media_storage={vn_storage}
+      id="skip_flag_min_chars"
+      description="⚡ Flag Lines Over"
+      units="chars"
+      value="0"
+    />
   </div>
 
   <BackupSettings />

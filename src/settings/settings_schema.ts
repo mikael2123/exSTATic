@@ -14,6 +14,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   "bottom_line_padding",
   "inactivity_blur",
   "menu_blur",
+  "skip_flag_min_chars",
 ] as const satisfies readonly (keyof TypeProperties)[];
 
 export type ExportableSettingKey = (typeof EXPORTABLE_SETTING_KEYS)[number];
@@ -29,4 +30,5 @@ export const SETTING_LABELS: Record<ExportableSettingKey, string> = {
   bottom_line_padding: "Bottom Pushback",
   inactivity_blur: "Inactivity Blur",
   menu_blur: "Menu Blur",
+  skip_flag_min_chars: "⚡ Flag Lines Over",
 };
