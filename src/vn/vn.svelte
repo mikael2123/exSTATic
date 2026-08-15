@@ -511,6 +511,8 @@
     box-shadow: inset 4px 0 0 theme("colors.button-text");
   }
 
+  /* grow: the blank space after a short line belongs to the text element, which
+     has no click handler. Only the fixed gutter to its right selects. */
   .sentence {
     @apply jp-text inline-block grow text-left text-text;
   }
@@ -528,10 +530,15 @@
     @apply h-6 w-6 shrink-0 rounded-full bg-button text-button-text;
   }
 
-  /* Padded wrapper so clicks near the checkbox still land. select-none is on
-     the hit area only — the line text stays selectable for dictionary lookups. */
+  /* A fixed-width gutter at the row's right edge — the same target on every row,
+     long or short, so selecting never depends on where the text happens to end.
+     min-w rather than w so the ⚡ can never overflow it; self-stretch makes the
+     whole gutter clickable top-to-bottom on wrapped rows; -ml-4 eats the row's
+     gap-4 so there is no dead strip immediately left of the target. select-none
+     is on the gutter only — the line text stays selectable for dictionary
+     lookups. */
   .line-select-hit {
-    @apply flex shrink-0 cursor-pointer select-none items-center p-3;
+    @apply -ml-4 flex min-w-[6rem] shrink-0 cursor-pointer select-none items-center justify-end gap-4 self-stretch p-3;
   }
 
   /* Display-only hint that a line is long enough to have been skipped. */

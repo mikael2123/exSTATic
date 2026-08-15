@@ -49,12 +49,10 @@
   data-line-id={id}
   data-time={time}
 >
-  <p class="sentence w-full">{sentence}</p>
-  {#if flagged}
-    <span class="skip-flag" title="{chars} characters — possible skip">⚡</span>
-  {/if}
-  <!-- Padded hit area: the checkbox itself is small, and the whole row must
-       stay clickable for dictionary lookups on the text. -->
+  <p class="sentence">{sentence}</p>
+  <!-- The hit area is a fixed-width gutter at the row's right edge, the same on
+       every row however short the text is. The text itself is deliberately not
+       a target — clicks on it belong to dictionary lookups. -->
   <span
     class="line-select-hit"
     role="presentation"
@@ -62,6 +60,11 @@
     onclick={handleClick}
     ondblclick={handleDoubleClick}
   >
+    {#if flagged}
+      <span class="skip-flag" title="{chars} characters — possible skip"
+        >⚡</span
+      >
+    {/if}
     <input type="checkbox" class="line-select" checked={selected} />
   </span>
 </div>
