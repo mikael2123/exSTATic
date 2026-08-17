@@ -75,7 +75,10 @@ export class InstanceStorage<
     const details = rawDetails.hasOwnProperty(uuid) ? rawDetails[uuid] : {};
 
     const today = immersionDay(properties?.day_rollover_hours ?? 0);
-    const uuid_date_key = JSON.stringify([uuid, today]);
+    // Must match the key every writer uses (#addStats / setDailyStats), otherwise
+    // today_stats is always undefined and the stat bar reads 00:00:00 until the
+    // first tick of the session repopulates it.
+    const uuid_date_key = JSON.stringify([client, uuid, today]);
     const today_stats = (await browser.storage.local.get(uuid_date_key))[
       uuid_date_key
     ];

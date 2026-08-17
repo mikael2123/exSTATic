@@ -25,6 +25,17 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
   uuid?: string;
   previous_time?: number;
 
+  // Seconds already written to time_read that are only provisionally real:
+  // everything credited since the last line was captured. Keyed by immersion day
+  // because a grace window can straddle the rollover hour. The window is handed
+  // back if it ends in an AFK timeout, and kept if it ends in a line or in a
+  // deliberate pause.
+  #pending_afk_credit: { [day: string]: number } = {};
+  // The last_active_at the ledger above is keyed to. Any other value means a line
+  // arrived (InstanceStorage.insertLine) or the timer was resumed by hand
+  // (toggleActive), either of which confirms every second credited so far.
+  #credit_anchor?: number;
+
   constructor(
     type_storage: TypeStorage,
     instance_storage?: InstanceStorage<TDetails>,
@@ -91,6 +102,11 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
     this.uuid = this.instance_storage.uuid;
     this.details = instance_storage.details;
 
+    // The pending seconds were credited against the media being swapped out and
+    // cannot be refunded against this one. A switch only happens because a line
+    // arrived, which confirms them anyway.
+    this.#confirmPendingCredit();
+
     // Dispatch an event
     await this.logLines();
   }
@@ -118,10 +134,44 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
 
   stop_ticker(event = true) {
     this.previous_time = undefined;
+    // A deliberate stop — the pause button, a double-click, the capture toggle —
+    // asserts that the time up to this instant was real reading, so the pending
+    // seconds are confirmed rather than handed back. The AFK path refunds first
+    // and then calls this, so nothing is lost here.
+    this.#confirmPendingCredit();
 
     if (event) {
       const event = new Event("status_inactive");
       document.dispatchEvent(event);
+    }
+  }
+
+  // Forget the pending seconds without handing them back: they count as real
+  // reading. Every path except the AFK timeout ends here.
+  #confirmPendingCredit() {
+    this.#pending_afk_credit = {};
+    this.#credit_anchor = undefined;
+  }
+
+  // Hand back every second credited since the last line. previous_time is
+  // dropped and the ledger snapshotted-and-cleared up front, both synchronously,
+  // so an overlapping ticker invocation can neither bank another second while
+  // these writes are in flight nor refund the same seconds twice.
+  async #refundAfkCredit() {
+    const refunds = this.#pending_afk_credit;
+    this.previous_time = undefined;
+    this.#confirmPendingCredit();
+
+    if (this.instance_storage == undefined) {
+      return;
+    }
+
+    for (const [day, seconds] of Object.entries(refunds)) {
+      // A non-finite entry means time_read is already poisoned upstream;
+      // subtracting it would only spread the damage to other days.
+      if (seconds === 0 || !Number.isFinite(seconds)) continue;
+
+      await this.instance_storage.subDailyStats(day, { time_read: seconds });
     }
   }
 
@@ -132,24 +182,44 @@ export class MediaStorage<TDetails extends InstanceDetails = InstanceDetails> {
       return;
     }
 
-    const time_between_lines =
-      this.details && this.details.last_active_at
-        ? time_now - this.details.last_active_at
-        : 0;
+    const last_active_at = this.details?.last_active_at;
+    const time_between_lines = last_active_at ? time_now - last_active_at : 0;
     const time_between_ticks = time_now - this.previous_time;
 
     this.previous_time = time_now;
 
+    // Every mutation of the ledger happens in this synchronous prefix, ahead of
+    // the first await. The interval is a bare setInterval and a tick can outlast
+    // its slot, so invocations do overlap; keeping the bookkeeping unyielding is
+    // what stops one tick from re-filling a ledger another has just refunded.
+    if (last_active_at !== this.#credit_anchor) {
+      this.#pending_afk_credit = {};
+      this.#credit_anchor = last_active_at;
+    }
+
     // Keep incrementing the time read counter whilst the max afk time isn't exceeded
     if (time_between_lines <= this.properties.afk_max_time) {
-      await this.instance_storage.addDailyStats(
-        this.instance_storage.currentDay(),
-        {
-          time_read: time_between_ticks,
-        },
-      );
+      // One resolved day for both the credit and the ledger entry, so a tick
+      // landing on the rollover instant cannot file them under different days.
+      const day = this.instance_storage.currentDay();
+
+      // Only the part of this tick that falls after the last line is provisional;
+      // the rest was already confirmed by that line. Across a run of ticks this
+      // telescopes to exactly (last tick - last_active_at), so the refund returns
+      // the grace window to the second rather than approximately.
+      this.#pending_afk_credit[day] =
+        (this.#pending_afk_credit[day] ?? 0) +
+        Math.min(time_between_ticks, Math.max(0, time_between_lines));
+
+      await this.instance_storage.addDailyStats(day, {
+        time_read: time_between_ticks,
+      });
       this.start_ticker();
     } else {
+      // Silence all the way to the timeout means none of the window was reading.
+      // Refund before stop_ticker fires status_inactive, so the stat bar redraws
+      // from the corrected total instead of the inflated one.
+      await this.#refundAfkCredit();
       this.stop_ticker();
     }
   }
